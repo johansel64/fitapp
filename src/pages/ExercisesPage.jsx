@@ -1,0 +1,229 @@
+import { useState, useEffect } from 'react'
+import { useExercises } from '../hooks/useExercises'
+
+const MUSCLES = ['chest', 'back', 'legs', 'glutes', 'shoulders', 'arms', 'core', 'cardio', 'full_body']
+const EQUIPMENT = ['none', 'dumbbells', 'barbell', 'machine', 'bands', 'bodyweight']
+const DIFFICULTIES = ['beginner', 'intermediate', 'advanced']
+const MUSCLE_ES = { 
+  chest: 'Pecho', 
+  back: 'Espalda', 
+  legs: 'Piernas', 
+  glutes: 'Glúteos',
+  shoulders: 'Hombros', 
+  arms: 'Brazos', 
+  core: 'Core', 
+  cardio: 'Cardio', 
+  full_body: 'Cuerpo completo' 
+}
+const EQUIP_ES = { none: 'Sin equipo', dumbbells: 'Mancuernas', barbell: 'Barra', machine: 'Máquina', bands: 'Bandas', bodyweight: 'Peso corporal' }
+const DIFF_ES = { beginner: 'Principiante', intermediate: 'Intermedio', advanced: 'Avanzado' }
+
+function ExerciseForm({ initial, onSave, onCancel }) {
+  const [form, setForm] = useState(initial || { name: '', description: '', youtube_url: '', muscle_group: '', equipment: 'bodyweight', difficulty: 'beginner', is_public: false })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) return
+    setSaving(true)
+    await onSave(form)
+    setSaving(false)
+  }
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div className="form-group">
+        <label className="form-label">Nombre del ejercicio *</label>
+        <input className="input" value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ej: Sentadilla Búlgara" />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Descripción</label>
+        <textarea className="input" style={{ minHeight: 80, resize: 'none' }} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Cómo se hace, puntos clave..." />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Link de YouTube</label>
+        <input className="input" value={form.youtube_url} onChange={e => set('youtube_url', e.target.value)} placeholder="https://youtube.com/watch?v=..." />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Grupo muscular</label>
+        <div className="chip-row">
+          {MUSCLES.map(m => <button key={m} className={`chip ${form.muscle_group === m ? 'on' : ''}`} onClick={() => set('muscle_group', m)}>{MUSCLE_ES[m]}</button>)}
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Equipo</label>
+        <div className="chip-row">
+          {EQUIPMENT.map(e => <button key={e} className={`chip ${form.equipment === e ? 'on' : ''}`} onClick={() => set('equipment', e)}>{EQUIP_ES[e]}</button>)}
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Dificultad</label>
+        <div className="chip-row">
+          {DIFFICULTIES.map(d => <button key={d} className={`chip ${form.difficulty === d ? 'on' : ''}`} onClick={() => set('difficulty', d)}>{DIFF_ES[d]}</button>)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderTop: '0.5px solid var(--bd)', marginBottom: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t1)' }}>Ejercicio público</div>
+          <div style={{ fontSize: 12, color: 'var(--t2)' }}>Otros usuarios pueden usarlo en sus planes</div>
+        </div>
+        <div onClick={() => set('is_public', !form.is_public)} style={{ width: 44, height: 26, borderRadius: 13, background: form.is_public ? 'var(--pr)' : 'var(--bd)', cursor: 'pointer', position: 'relative', transition: 'background .2s' }}>
+          <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: form.is_public ? 21 : 3, transition: 'left .2s' }} />
+        </div>
+      </div>
+      <button className="btn btn-primary" onClick={handleSubmit} disabled={saving || !form.name.trim()}>
+        {saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear ejercicio'}
+      </button>
+      <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={onCancel}>Cancelar</button>
+    </div>
+  )
+}
+
+function ExerciseCard({ ex, onLike, liked, onEdit, onDelete, showActions = false }) {
+  const ytId = ex.youtube_url?.match(/(?:v=|youtu\.be\/)([^&?/]+)/)?.[1]
+
+  return (
+    <div className="card" style={{ marginBottom: 10, cursor: 'default' }}>
+      {ytId && (
+        <div style={{ position: 'relative', paddingBottom: '56.25%', background: '#000', borderRadius: 'var(--r) var(--r) 0 0', overflow: 'hidden' }}>
+          <iframe src={`https://www.youtube.com/embed/${ytId}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }} allow="accelerometer; autoplay; encrypted-media" allowFullScreen />
+        </div>
+      )}
+      <div style={{ padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>{ex.name}</div>
+            {ex.description && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 4, lineHeight: 1.5 }}>{ex.description}</div>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+          {ex.muscle_group && <span className="tag">{MUSCLE_ES[ex.muscle_group] || ex.muscle_group}</span>}
+          {ex.equipment && <span className="tag">{EQUIP_ES[ex.equipment] || ex.equipment}</span>}
+          {ex.difficulty && <span className="tag">{DIFF_ES[ex.difficulty] || ex.difficulty}</span>}
+          {ex.is_public && <span className="tag tag-green">Público</span>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <button onClick={() => onLike(ex.id)} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', color: liked ? 'var(--pr)' : 'var(--t2)', fontSize: 13 }}>
+            <span>{liked ? '❤️' : '🤍'}</span>
+            <span>{ex.likes_count || 0}</span>
+          </button>
+          {showActions && (
+            <>
+              <button onClick={() => onEdit(ex)} className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }}>Editar</button>
+              <button onClick={() => { if (confirm('¿Eliminar?')) onDelete(ex.id) }} className="btn btn-secondary btn-sm" style={{ color: 'var(--pr-d)' }}>Eliminar</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function ExercisesPage({ onNavigate }) {
+  const { myExercises, publicExercises, loading, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
+  const [tab, setTab] = useState('explore') // explore | mine
+  const [view, setView] = useState('list') // list | create | edit
+  const [editing, setEditing] = useState(null)
+  const [likedIds, setLikedIds] = useState([])
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState(null)
+  const [filterMuscle, setFilterMuscle] = useState('')
+
+  useEffect(() => {
+    getUserLikes().then(setLikedIds)
+  }, [])
+
+  const handleSearch = async () => {
+    const data = await searchExercises(search, { muscle_group: filterMuscle || undefined })
+    setResults(data)
+  }
+
+  const handleLike = async (id) => {
+    const nowLiked = await toggleLike(id)
+    setLikedIds(prev => nowLiked ? [...prev, id] : prev.filter(x => x !== id))
+  }
+
+  const handleCreate = async (form) => {
+    await createExercise(form)
+    setView('list')
+  }
+
+  const handleUpdate = async (form) => {
+    await updateExercise(editing.id, form)
+    setEditing(null)
+    setView('list')
+  }
+
+  if (view === 'create') return (
+    <div>
+      <div className="hdr"><button className="btn-ghost" onClick={() => setView('list')}>‹</button><div><div className="hdr-title">Nuevo ejercicio</div></div></div>
+      <ExerciseForm onSave={handleCreate} onCancel={() => setView('list')} />
+    </div>
+  )
+
+  if (view === 'edit' && editing) return (
+    <div>
+      <div className="hdr"><button className="btn-ghost" onClick={() => setView('list')}>‹</button><div><div className="hdr-title">Editar ejercicio</div></div></div>
+      <ExerciseForm initial={editing} onSave={handleUpdate} onCancel={() => { setEditing(null); setView('list') }} />
+    </div>
+  )
+
+  const displayList = results !== null ? results : (tab === 'mine' ? myExercises : publicExercises)
+
+  return (
+    <div>
+      <div className="hdr">
+        <button className="btn-ghost" onClick={() => onNavigate('home')}>‹</button>
+        <div><div className="hdr-title">Ejercicios</div><div className="hdr-sub">{publicExercises.length} públicos</div></div>
+        <div className="hdr-right">
+          <button className="btn btn-primary btn-sm" onClick={() => setView('create')}>+ Nuevo</button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="tog" style={{ margin: '10px 16px' }}>
+        <button className={`toggle-btn ${tab === 'explore' ? 'on' : ''}`} onClick={() => { setTab('explore'); setResults(null) }}>Explorar</button>
+        <button className={`toggle-btn ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setResults(null) }}>Mis ejercicios</button>
+      </div>
+
+      {/* Búsqueda */}
+      {tab === 'explore' && (
+        <div style={{ padding: '0 16px 8px' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="input" placeholder="Buscar ejercicio..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} style={{ flex: 1 }} />
+            <button className="btn btn-primary" style={{ width: 'auto', padding: '0 14px' }} onClick={handleSearch}>🔍</button>
+          </div>
+          <div className="chip-row" style={{ marginTop: 8 }}>
+            <button className={`chip ${filterMuscle === '' ? 'on' : ''}`} onClick={() => setFilterMuscle('')}>Todos</button>
+            {MUSCLES.map(m => <button key={m} className={`chip ${filterMuscle === m ? 'on' : ''}`} onClick={() => setFilterMuscle(m)}>{MUSCLE_ES[m]}</button>)}
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      <div className="sec" style={{ paddingBottom: 24 }}>
+        {loading && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24 }}>Cargando...</div>}
+        {!loading && displayList.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--t2)' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>💪</div>
+            <div style={{ fontSize: 14, color: 'var(--t1)', fontWeight: 500, marginBottom: 4 }}>
+              {tab === 'mine' ? 'Aún no tienes ejercicios' : 'No se encontraron ejercicios'}
+            </div>
+            {tab === 'mine' && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setView('create')}>Crear primer ejercicio</button>}
+          </div>
+        )}
+        {displayList.map(ex => (
+          <ExerciseCard
+            key={ex.id}
+            ex={ex}
+            liked={likedIds.includes(ex.id)}
+            onLike={handleLike}
+            showActions={tab === 'mine'}
+            onEdit={(ex) => { setEditing(ex); setView('edit') }}
+            onDelete={deleteExercise}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}

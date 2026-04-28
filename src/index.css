@@ -25,15 +25,17 @@
   background: var(--bg);
 }
 
-[data-theme="dark"] {
-  --bg: #111110;
-  --surface: #1C1C1A;
-  --surface2: #252523;
-  --t1: #F0EFE9;
-  --t2: #9A9992;
-  --t3: #5E5D58;
-  --bd: rgba(255,255,255,0.10);
-  --bd2: rgba(255,255,255,0.18);
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110;
+    --surface: #1C1C1A;
+    --surface2: #252523;
+    --t1: #F0EFE9;
+    --t2: #9A9992;
+    --t3: #5E5D58;
+    --bd: rgba(255,255,255,0.10);
+    --bd2: rgba(255,255,255,0.18);
+  }
 }
 
 body { background: var(--bg); min-height: 100vh; }

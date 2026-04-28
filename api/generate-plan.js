@@ -65,21 +65,18 @@ export default async function handler(req, res) {
   ]
 }
 
-INSTRUCCIONES ESTRICTAS:
+INSTRUCCIONES:
 - Objetivo: ${goal}
 - Nivel: ${level}
-- Duración: ${duration} días
-- Notas: ${extra || 'ninguna'}
-- EXACTAMENTE 2 semanas (semana 1 y semana final)
-- EXACTAMENTE 5 días por semana (3 entrenamiento, 1 descanso, 1 cardio)
-- MÁXIMO 4 ejercicios por sección
-- MÁXIMO 2 secciones por día
-- Nombres de ejercicios MUY cortos (máx 3 palabras)
-- Sin descripciones largas
-- "focus" máximo 2 palabras
-- "description" máximo 15 palabras
-- "name" del plan máximo 3 palabras
-- Responde ÚNICAMENTE JSON válido, sin texto, sin markdown`
+- Duración total: ${duration} días
+- Notas del usuario: ${extra || 'ninguna'}
+- Incluye EXACTAMENTE 2 semanas: semana 1 (adaptación) y semana final (intensidad máxima)
+- Cada semana debe tener entre 4 y 7 días
+- Los días de descanso tienen sections: []
+- Para ejercicios con tiempo usa: "type": "time", "seconds": 30 en lugar de reps
+- El campo "rest" es en segundos de descanso entre series
+- Usa ejercicios en español
+- Responde ÚNICAMENTE con el JSON válido, sin texto adicional, sin markdown, sin explicaciones`
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -91,10 +88,10 @@ INSTRUCCIONES ESTRICTAS:
         'X-Title': 'FitApp'
       },
       body: JSON.stringify({
-        model: 'openrouter/free',
+        model: 'meta-llama/llama-4-scout:free',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
-        max_tokens: 4000
+        max_tokens: 2048
       })
     })
 

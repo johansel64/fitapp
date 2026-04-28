@@ -1,21 +1,45 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useProgress } from '../hooks/useProgress'
+
+const VideoSection = ({ youtubeUrl, name }) => {
+  const ytId = youtubeUrl?.match(/(?:v=|youtu\.be\/|shorts\/)([^&?/\s]+)/)?.[1] || null
+
+  if (!youtubeUrl) return null
+
+  if (ytId) return (
+    <div style={{ margin: '0 16px 16px', borderRadius: 'var(--r)', overflow: 'hidden', border: '0.5px solid var(--bd)', background: '#000' }}>
+      <iframe
+        width="100%"
+        height="200"
+        src={`https://www.youtube.com/embed/${ytId}`}
+        allow="encrypted-media"
+        allowFullScreen
+        style={{ display: 'block', border: 'none' }}
+      />
+    </div>
+  )
+
+  return (
+    <div onClick={() => window.open(youtubeUrl, '_blank')}
+      style={{ margin: '0 16px 16px', display: 'flex', alignItems: 'center', gap: 8, padding: '11px 16px', border: '0.5px solid var(--bd)', borderRadius: 'var(--r)', cursor: 'pointer', background: 'var(--surface)', fontSize: 13, color: 'var(--t2)' }}>
+      <div style={{ width: 22, height: 16, background: '#FF0000', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderLeft: '8px solid white' }} />
+      </div>
+      <span>Ver {name} en YouTube ↗</span>
+    </div>
+  )
+}
 
 export default function PlayerPage({ exercises = [], startIndex = 0, planId, dayNumber, onBack, onComplete }) {
   const { logSeries, completeDay } = useProgress(planId)
   const [exIdx, setExIdx] = useState(startIndex)
   const [series, setSeries] = useState(1)
-  const [phase, setPhase] = useState('exercise') // 'exercise' | 'rest'
+  const [phase, setPhase] = useState('exercise')
   const [timeLeft, setTimeLeft] = useState(0)
   const [running, setRunning] = useState(false)
   const timerRef = useRef(null)
-  const [exerciseData, setExerciseData] = useState(null)
-  const [loadingEx, setLoadingEx] = useState(false)
 
   const ex = exercises[exIdx]
-  const nextEx = phase === 'rest'
-    ? (series < ex?.sets ? null : exercises[exIdx + 1])
-    : null
   const isLast = exIdx === exercises.length - 1 && series === ex?.sets
 
   useEffect(() => {
@@ -26,7 +50,7 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
     }
   }, [exIdx, series])
 
-  const clearTimer = () => { clearInterval(timerRef.current); }
+  const clearTimer = () => { clearInterval(timerRef.current); timerRef.current = null }
 
   const startTimer = (secs, onDone) => {
     setRunning(true)
@@ -36,23 +60,6 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
         return t - 1
       })
     }, 1000)
-  }
-
-  const loadExerciseImages = async (exerciseName) => {
-    setExerciseData(null)
-    setLoadingEx(true)
-    try {
-      const res = await fetch('/api/exercise-gif', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: exerciseName })
-      })
-      const data = await res.json()
-      if (data.gifUrl) setExerciseData(data)
-    } catch (e) {
-      console.error(e)
-    }
-    setLoadingEx(false)
   }
 
   const togglePlay = () => {
@@ -103,49 +110,14 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
 
   const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
-  const ExerciseDemo = ({ name }) => (
-    <div style={{ margin: '0 16px' }}>
-      {!exerciseData ? (
-        <div
-          onClick={() => !loadingEx && loadExerciseImages(name)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px 16px', border: '0.5px solid var(--bd)', borderRadius: 'var(--r)', cursor: 'pointer', background: 'var(--surface)', fontSize: 13, color: 'var(--t2)' }}
-        >
-          <span>🎬</span>
-          <span>{loadingEx ? 'Buscando...' : `Ver cómo hacer ${name}`}</span>
-        </div>
-      ) : (
-        <div style={{ borderRadius: 'var(--r)', overflow: 'hidden', border: '0.5px solid var(--bd)', background: 'var(--surface2)' }}>
-          <img src={exerciseData.gifUrl} alt={name} style={{ width: '100%', maxHeight: 240, objectFit: 'contain', display: 'block', background: '#fff' }} />
-          <div style={{ padding: '10px 14px' }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t1)', marginBottom: 4, textTransform: 'capitalize' }}>{exerciseData.name}</div>
-            <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 8 }}>
-              Músculo: <span style={{ color: 'var(--pr)', textTransform: 'capitalize' }}>{exerciseData.target}</span>
-            </div>
-            {exerciseData.instructions?.map((step, i) => (
-              <div key={i} style={{ fontSize: 12, color: 'var(--t2)', padding: '3px 0', borderTop: i > 0 ? '0.5px solid var(--bd)' : 'none' }}>
-                {i + 1}. {step}
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={() => setExerciseData(null)}
-            style={{ width: '100%', padding: '9px', background: 'none', border: 'none', borderTop: '0.5px solid var(--bd)', cursor: 'pointer', fontSize: 13, color: 'var(--t2)' }}
-          >
-            Cerrar ✕
-          </button>
-        </div>
-      )}
-    </div>
-  )
-
+  // Extrae el ID de YouTube de cualquier formato de URL
+  const getYtId = (url) => url?.match(/(?:v=|youtu\.be\/|shorts\/)([^&?/\s]+)/)?.[1] || null
 
   if (!ex) return null
 
   // ── PANTALLA DE DESCANSO ──────────────────────────────────────
   if (phase === 'rest') {
-    const siguienteNombre = series < ex.sets
-      ? ex.name
-      : exercises[exIdx + 1]?.name || 'Fin'
+    const nextExercise = series < ex.sets ? ex : exercises[exIdx + 1]
 
     return (
       <div>
@@ -174,20 +146,22 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
           </div>
         </div>
 
-        {/* YouTube del siguiente ejercicio durante el descanso */}
-        <div style={{ padding: '0 0 8px' }}>
-          <div style={{ fontSize: 12, color: 'var(--t2)', textAlign: 'center', marginBottom: 8 }}>
-            Mira el siguiente ejercicio mientras descansas
+        {/* Video del siguiente ejercicio durante el descanso */}
+        {nextExercise && (
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--t2)', textAlign: 'center', marginBottom: 8 }}>
+              Mira el siguiente ejercicio mientras descansas
+            </div>
+            <VideoSection youtubeUrl={ex.youtube_url} name={ex.name} />
           </div>
-          <ExerciseDemo name={ex.name} />
-        </div>
+        )}
       </div>
     )
   }
 
   // ── PANTALLA DE EJERCICIO ─────────────────────────────────────
   return (
-    <div>
+    <div style={{ paddingBottom: 24 }}>
       <div className="hdr">
         <button className="btn-ghost" onClick={() => { clearTimer(); onBack() }}>‹</button>
         <div>
@@ -252,12 +226,8 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
         )}
       </div>
 
-      {/* Botón YouTube */}
-      <ExerciseDemo name={ex.name} />
-      <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--t3)', marginTop: 8, paddingBottom: 24 }}>
-        Abre YouTube con tutorial del ejercicio
-      </div>
-
+      {/* Video del ejercicio actual */}
+      <VideoSection youtubeUrl={ex.youtube_url} name={ex.name} />
     </div>
   )
 }
