@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useExercises } from '../hooks/useExercises'
+import ExerciseGif from '../components/ExerciseGif'
+import { useYouTubeSearch, useDebounce } from '../hooks/useYouTubeSearch'
+import { SkeletonCard } from '../components/Skeleton'
 
 const MUSCLES = ['chest', 'back', 'legs', 'glutes', 'shoulders', 'arms', 'core', 'cardio', 'full_body']
 const EQUIPMENT = ['none', 'dumbbells', 'barbell', 'machine', 'bands', 'bodyweight']
@@ -21,11 +24,22 @@ const DIFF_ES = { beginner: 'Principiante', intermediate: 'Intermedio', advanced
 function ExerciseForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { name: '', description: '', youtube_url: '', muscle_group: '', equipment: 'bodyweight', difficulty: 'beginner', is_public: false })
   const [saving, setSaving] = useState(false)
+  const [autoSearching, setAutoSearching] = useState(false)
+  const { search: ytSearch } = useYouTubeSearch()
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const handleSubmit = async () => {
     if (!form.name.trim()) return
     setSaving(true)
+    
+    // Auto-search YouTube if no URL provided
+    if (!form.youtube_url && form.name.trim()) {
+      setAutoSearching(true)
+      const ytUrl = await ytSearch(form.name)
+      if (ytUrl) set('youtube_url', ytUrl)
+      setAutoSearching(false)
+    }
+    
     await onSave(form)
     setSaving(false)
   }
@@ -71,8 +85,8 @@ function ExerciseForm({ initial, onSave, onCancel }) {
           <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: form.is_public ? 21 : 3, transition: 'left .2s' }} />
         </div>
       </div>
-      <button className="btn btn-primary" onClick={handleSubmit} disabled={saving || !form.name.trim()}>
-        {saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear ejercicio'}
+      <button className="btn btn-primary" onClick={handleSubmit} disabled={saving || autoSearching || !form.name.trim()}>
+        {autoSearching ? 'Buscando video...' : saving ? 'Guardando...' : initial ? 'Guardar cambios' : 'Crear ejercicio'}
       </button>
       <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={onCancel}>Cancelar</button>
     </div>
@@ -90,7 +104,8 @@ function ExerciseCard({ ex, onLike, liked, onEdit, onDelete, showActions = false
         </div>
       )}
       <div style={{ padding: '12px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          {!ytId && <ExerciseGif exerciseName={ex.name} />}
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>{ex.name}</div>
             {ex.description && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 4, lineHeight: 1.5 }}>{ex.description}</div>}
@@ -126,12 +141,19 @@ export default function ExercisesPage({ onNavigate }) {
   const [editing, setEditing] = useState(null)
   const [likedIds, setLikedIds] = useState([])
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 400)
   const [results, setResults] = useState(null)
   const [filterMuscle, setFilterMuscle] = useState('')
 
   useEffect(() => {
     getUserLikes().then(setLikedIds)
   }, [])
+
+  useEffect(() => {
+    if (debouncedSearch || filterMuscle) {
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined }).then(setResults)
+    }
+  }, [debouncedSearch, filterMuscle])
 
   const handleSearch = async () => {
     const data = await searchExercises(search, { muscle_group: filterMuscle || undefined })
@@ -189,10 +211,7 @@ export default function ExercisesPage({ onNavigate }) {
       {/* Búsqueda */}
       {tab === 'explore' && (
         <div style={{ padding: '0 16px 8px' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input className="input" placeholder="Buscar ejercicio..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} style={{ flex: 1 }} />
-            <button className="btn btn-primary" style={{ width: 'auto', padding: '0 14px' }} onClick={handleSearch}>🔍</button>
-          </div>
+          <input className="input" placeholder="Buscar ejercicio..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%' }} />
           <div className="chip-row" style={{ marginTop: 8 }}>
             <button className={`chip ${filterMuscle === '' ? 'on' : ''}`} onClick={() => setFilterMuscle('')}>Todos</button>
             {MUSCLES.map(m => <button key={m} className={`chip ${filterMuscle === m ? 'on' : ''}`} onClick={() => setFilterMuscle(m)}>{MUSCLE_ES[m]}</button>)}
@@ -202,7 +221,11 @@ export default function ExercisesPage({ onNavigate }) {
 
       {/* Lista */}
       <div className="sec" style={{ paddingBottom: 24 }}>
-        {loading && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24 }}>Cargando...</div>}
+        {loading && (
+          <div>
+            {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        )}
         {!loading && displayList.length === 0 && (
           <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--t2)' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>💪</div>

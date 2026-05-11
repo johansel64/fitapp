@@ -1,23 +1,34 @@
 import { useState, useEffect } from 'react'
 import { usePlansV2 } from '../hooks/usePlansV2'
+import TemplatePicker from '../components/TemplatePicker'
+import { useDebounce } from '../hooks/useYouTubeSearch'
+import { SkeletonCard } from '../components/Skeleton'
+import { useToast } from '../context/ToastContext'
 
 export default function PlansPageV2({ onNavigate }) {
-  const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes } = usePlansV2()
-  const [tab, setTab] = useState('mine') // mine | explore
-  const [view, setView] = useState('list') // list | create
+  const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan } = usePlansV2()
+  const toast = useToast()
+  const [tab, setTab] = useState('mine')
+  const [view, setView] = useState('list')
   const [publicPlans, setPublicPlans] = useState([])
   const [likedIds, setLikedIds] = useState([])
   const [form, setForm] = useState({ name: '', description: '', total_days: 30, is_public: false })
   const [saving, setSaving] = useState(false)
+  const [cloning, setCloning] = useState(null)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 400)
 
   useEffect(() => {
     getUserLikes().then(setLikedIds)
     if (tab === 'explore') loadPublic()
   }, [tab])
 
+  useEffect(() => {
+    if (tab === 'explore') loadPublic()
+  }, [debouncedSearch])
+
   const loadPublic = async () => {
-    const data = await getPublicPlans(search)
+    const data = await getPublicPlans(debouncedSearch)
     setPublicPlans(data)
   }
 
@@ -28,16 +39,32 @@ export default function PlansPageV2({ onNavigate }) {
     if (data) {
       setSaving(false)
       setView('list')
-      // Ir al constructor del plan recién creado
       onNavigate('plan-builder', { planId: data.id })
     }
     setSaving(false)
+  }
+
+  const handleTemplateCreated = (planId) => {
+    setView('list')
+    onNavigate('plan-builder', { planId })
   }
 
   const handleLike = async (planId) => {
     const nowLiked = await toggleLike(planId)
     setLikedIds(prev => nowLiked ? [...prev, planId] : prev.filter(x => x !== planId))
     await loadPublic()
+  }
+
+  const handleClone = async (planId, planName) => {
+    setCloning(planId)
+    const { data, error } = await clonePlan(planId)
+    setCloning(null)
+    if (error) {
+      toast.error('Error al copiar el plan')
+      return
+    }
+    toast.success(`Plan "${planName}" copiado con éxito`)
+    onNavigate('plan-builder', { planId: data.id })
   }
 
   const PlanCard = ({ plan, isOwn = false }) => (
@@ -64,7 +91,17 @@ export default function PlansPageV2({ onNavigate }) {
             Editar días
           </button>
         )}
-        <button onClick={() => !tab === 'mine' ? handleLike(plan.id) : null} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '0.5px solid var(--bd)', borderRadius: 'var(--rm)', padding: '6px 10px', cursor: 'pointer', color: likedIds.includes(plan.id) ? 'var(--pr)' : 'var(--t2)', fontSize: 13 }}>
+        {!isOwn && (
+          <button
+            className="btn btn-secondary btn-sm"
+            style={{ flex: 1 }}
+            onClick={() => handleClone(plan.id, plan.name)}
+            disabled={cloning === plan.id}
+          >
+            {cloning === plan.id ? 'Copiando...' : '📋 Copiar'}
+          </button>
+        )}
+        <button onClick={() => !isOwn ? handleLike(plan.id) : null} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '0.5px solid var(--bd)', borderRadius: 'var(--rm)', padding: '6px 10px', cursor: 'pointer', color: likedIds.includes(plan.id) ? 'var(--pr)' : 'var(--t2)', fontSize: 13 }}>
           {likedIds.includes(plan.id) ? '❤️' : '🤍'} {plan.likes_count || 0}
         </button>
         {isOwn && (
@@ -74,6 +111,10 @@ export default function PlansPageV2({ onNavigate }) {
         )}
       </div>
     </div>
+  )
+
+  if (view === 'template') return (
+    <TemplatePicker onPlanCreated={handleTemplateCreated} onCancel={() => setView('list')} />
   )
 
   if (view === 'create') return (
@@ -109,7 +150,7 @@ export default function PlansPageV2({ onNavigate }) {
           </div>
         </div>
         <button className="btn btn-primary" onClick={handleCreate} disabled={saving || !form.name.trim()}>
-          {saving ? 'Creando...' : 'Crear plan y configurar días ›'}
+          {saving ? 'Creando...' : 'Crear plan vacío ›'}
         </button>
         <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={() => setView('list')}>Cancelar</button>
       </div>
@@ -122,6 +163,7 @@ export default function PlansPageV2({ onNavigate }) {
         <button className="btn-ghost" onClick={() => onNavigate('home')}>‹</button>
         <div><div className="hdr-title">Planes</div><div className="hdr-sub">{myPlans.length} propios</div></div>
         <div className="hdr-right">
+          <button className="btn btn-secondary btn-sm" onClick={() => setView('template')}>📋 Plantilla</button>
           <button className="btn btn-primary btn-sm" onClick={() => setView('create')}>+ Nuevo</button>
         </div>
       </div>
@@ -132,14 +174,17 @@ export default function PlansPageV2({ onNavigate }) {
       </div>
 
       {tab === 'explore' && (
-        <div style={{ padding: '0 16px 8px', display: 'flex', gap: 8 }}>
-          <input className="input" placeholder="Buscar planes..." value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadPublic()} style={{ flex: 1 }} />
-          <button className="btn btn-primary" style={{ width: 'auto', padding: '0 14px' }} onClick={loadPublic}>🔍</button>
+        <div style={{ padding: '0 16px 8px' }}>
+          <input className="input" placeholder="Buscar planes..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%' }} />
         </div>
       )}
 
       <div className="sec" style={{ paddingBottom: 80 }}>
-        {loading && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24 }}>Cargando...</div>}
+        {loading && (
+          <div>
+            {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        )}
 
         {tab === 'mine' && (
           <>
@@ -147,7 +192,10 @@ export default function PlansPageV2({ onNavigate }) {
               <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--t2)' }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
                 <div style={{ fontSize: 14, color: 'var(--t1)', fontWeight: 500, marginBottom: 4 }}>Sin planes aún</div>
-                <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setView('create')}>Crear primer plan</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                  <button className="btn btn-primary" onClick={() => setView('template')}>📋 Crear desde plantilla</button>
+                  <button className="btn btn-secondary" onClick={() => setView('create')}>+ Crear plan vacío</button>
+                </div>
               </div>
             )}
             {myPlans.map(plan => <PlanCard key={plan.id} plan={plan} isOwn />)}
@@ -156,7 +204,7 @@ export default function PlansPageV2({ onNavigate }) {
 
         {tab === 'explore' && (
           <>
-            {publicPlans.length === 0 && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24, fontSize: 13 }}>No hay planes públicos aún</div>}
+            {publicPlans.length === 0 && !loading && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24, fontSize: 13 }}>No hay planes públicos aún</div>}
             {publicPlans.map(plan => <PlanCard key={plan.id} plan={plan} />)}
           </>
         )}

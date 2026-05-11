@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useProgress } from '../hooks/useProgress'
 import { usePlansV2 } from '../hooks/usePlansV2'
+import { parseReps } from '../lib/parseReps'
 
 const MUSCLE_ICONS = { chest: '💪', back: '🏋️', legs: '🦵', glutes: '🍑', shoulders: '🔝', arms: '💪', core: '🔥', cardio: '🏃', full_body: '⚡', default: '💪' }
 
@@ -51,16 +52,61 @@ export default function HomePage({ activePlan, onNavigate, darkMode, onToggleDar
 
   // Convertir ejercicios del plan al formato del player
   const buildPlayerExercises = (pdes = []) => {
-    return pdes.map(pde => ({
-      name: pde.exercise?.name || 'Ejercicio',
-      sec: pde.exercise?.muscle_group || 'Principal',
-      icon: MUSCLE_ICONS[pde.exercise?.muscle_group] || MUSCLE_ICONS.default,
-      type: pde.duration_seconds ? 'time' : 'reps',
-      val: pde.duration_seconds || parseInt(pde.reps) || 12,
-      rest: pde.rest_seconds || 45,
-      sets: pde.sets || 3,
-      youtube_url: pde.exercise?.youtube_url || null,
-    }))
+    const grouped = []
+    const seen = new Set()
+
+    for (const pde of pdes) {
+      if (seen.has(pde.id)) continue
+
+      if (pde.superset_group) {
+        const group = pdes.filter(p => p.superset_group === pde.superset_group)
+        group.forEach(p => seen.add(p.id))
+
+        const leader = group.find(p => p.sets != null) || group[0]
+        const repInfo = parseReps(leader.reps)
+        const exercisesList = group
+          .filter(p => p.exercise)
+          .map(p => ({
+            name: p.exercise.name,
+            youtube_url: p.exercise.youtube_url,
+            muscle_group: p.exercise.muscle_group,
+          }))
+
+        grouped.push({
+          id: `ss_${pde.superset_group}`,
+          name: '🔗 Superserie',
+          sec: 'Superserie',
+          icon: '🔗',
+          type: repInfo.type,
+          exercises: exercisesList,
+          sets: leader.sets || 3,
+          reps: leader.reps || '12',
+          val: repInfo.val,
+          rest: leader.rest_seconds || 45,
+          rest_seconds: leader.rest_seconds || 45,
+          youtube_url: group.find(p => p.exercise)?.exercise?.youtube_url || null,
+          note: leader.note || null,
+        })
+      } else {
+        seen.add(pde.id)
+        const repInfo = parseReps(pde.reps)
+        grouped.push({
+          id: pde.id,
+          name: pde.exercise?.name || pde.name || 'Ejercicio',
+          sec: pde.exercise?.muscle_group || 'Principal',
+          icon: MUSCLE_ICONS[pde.exercise?.muscle_group] || MUSCLE_ICONS.default,
+          type: repInfo.type,
+          val: repInfo.val,
+          reps: pde.reps,
+          rest: pde.rest_seconds || 45,
+          rest_seconds: pde.rest_seconds || 45,
+          sets: pde.sets || 3,
+          youtube_url: pde.exercise?.youtube_url || null,
+          note: pde.note || null,
+        })
+      }
+    }
+    return grouped
   }
 
   const todayExercises = buildPlayerExercises(todayDayData?.exercises || [])

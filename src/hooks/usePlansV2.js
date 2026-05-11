@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
+import { getDayType, getDayName, WARMUP_EXERCISES } from '../data/templates'
 
 export function usePlansV2() {
   const { user } = useAuth()
@@ -18,10 +19,9 @@ export function usePlansV2() {
       .eq('user_id', user.id).order('created_at', { ascending: false })
     if (data) setMyPlans(data)
 
-    // Cargar plan activo
-  const { data: uap } = await supabase.from('user_active_plan')
-    .select('*, plan:plans(*)').eq('user_id', user.id).maybeSingle()
-  if (uap?.plan) setActivePlanState(uap.plan)
+    const { data: uap } = await supabase.from('user_active_plan')
+      .select('*, plan:plans(*)').eq('user_id', user.id).maybeSingle()
+    if (uap?.plan) setActivePlanState(uap.plan)
     setLoading(false)
   }
 
@@ -88,7 +88,6 @@ export function usePlansV2() {
 
   // ── EJERCICIOS EN DÍA ────────────────────────
   const addExerciseToDay = useCallback(async (planDayId, exerciseId, config = {}) => {
-    // Obtener el orden actual
     const { data: existing } = await supabase.from('plan_day_exercises')
       .select('order_index').eq('plan_day_id', planDayId).order('order_index', { ascending: false }).limit(1)
     const nextOrder = existing?.length ? (existing[0].order_index + 1) : 0
@@ -96,23 +95,79 @@ export function usePlansV2() {
     const { data } = await supabase.from('plan_day_exercises').insert({
       plan_day_id: planDayId,
       exercise_id: exerciseId,
-      sets: config.sets || 3,
+      sets: parseInt(config.sets) || 3,
       reps: config.reps || '12',
-      rest_seconds: config.rest_seconds || 45,
-      duration_seconds: config.duration_seconds || null,
-      order_index: nextOrder
-    }).select('*, exercise:exercises(*)').single()
+      rest_seconds: parseInt(config.rest_seconds) || 45,
+      order_index: nextOrder,
+      note: config.note || null,
+      superset_group: config.superset_group || null,
+    }).select('*, exercise:exercises(*)').maybeSingle()
     return data
   }, [])
 
   const updateExerciseInDay = useCallback(async (pdeId, updates) => {
+    const sanitized = {
+      sets: updates.sets != null ? parseInt(updates.sets) || 3 : undefined,
+      reps: updates.reps || '12',
+      rest_seconds: updates.rest_seconds != null ? parseInt(updates.rest_seconds) || 0 : undefined,
+      note: updates.note != null ? updates.note : undefined,
+      superset_group: updates.superset_group !== undefined ? updates.superset_group : undefined,
+    }
+    Object.keys(sanitized).forEach(k => sanitized[k] === undefined && delete sanitized[k])
+
     const { data } = await supabase.from('plan_day_exercises')
-      .update(updates).eq('id', pdeId).select('*, exercise:exercises(*)').single()
+      .update(sanitized).eq('id', pdeId).select('*, exercise:exercises(*)').maybeSingle()
     return data
   }, [])
 
   const removeExerciseFromDay = useCallback(async (pdeId) => {
     await supabase.from('plan_day_exercises').delete().eq('id', pdeId)
+  }, [])
+
+  // ── SUPER SERIES ─────────────────────────────
+  const createSupersetGroup = useCallback(async (planDayId, exerciseIds, config = {}) => {
+    const groupId = `ss_${Date.now()}`
+    const { data: existing } = await supabase.from('plan_day_exercises')
+      .select('order_index').eq('plan_day_id', planDayId).order('order_index', { ascending: false }).limit(1)
+    let nextOrder = existing?.length ? (existing[0].order_index + 1) : 0
+
+    const results = []
+    for (let i = 0; i < exerciseIds.length; i++) {
+      const isLeader = i === 0
+      const { data } = await supabase.from('plan_day_exercises').insert({
+        plan_day_id: planDayId,
+        exercise_id: exerciseIds[i],
+        sets: isLeader ? (parseInt(config.sets) || 3) : null,
+        reps: isLeader ? (config.reps || '12') : null,
+        rest_seconds: isLeader ? (parseInt(config.rest_seconds) || 45) : null,
+        order_index: nextOrder++,
+        note: isLeader ? (config.note || null) : null,
+        superset_group: groupId,
+      }).select('*, exercise:exercises(*)').maybeSingle()
+      results.push(data)
+    }
+    return { groupId, exercises: results }
+  }, [])
+
+  const addExerciseToSuperset = useCallback(async (planDayId, groupId, exerciseId) => {
+    const { data: existing } = await supabase.from('plan_day_exercises')
+      .select('order_index').eq('plan_day_id', planDayId).order('order_index', { ascending: false }).limit(1)
+    const nextOrder = existing?.length ? (existing[0].order_index + 1) : 0
+
+    const { data } = await supabase.from('plan_day_exercises').insert({
+      plan_day_id: planDayId,
+      exercise_id: exerciseId,
+      sets: null,
+      reps: null,
+      rest_seconds: null,
+      order_index: nextOrder,
+      superset_group: groupId,
+    }).select('*, exercise:exercises(*)').maybeSingle()
+    return data
+  }, [])
+
+  const deleteSupersetGroup = useCallback(async (groupId) => {
+    await supabase.from('plan_day_exercises').delete().eq('superset_group', groupId)
   }, [])
 
   // ── LIKES ─────────────────────────────────────
@@ -128,11 +183,161 @@ export function usePlansV2() {
     return (data || []).map(l => l.plan_id)
   }, [user])
 
+  // ── CREAR PLAN DESDE PLANTILLA ────────────────
+  const createPlanFromTemplate = useCallback(async (template) => {
+    const { data: plan, error } = await supabase.from('plans').insert({
+      user_id: user.id,
+      name: template.name,
+      description: template.description || null,
+      total_days: template.total_days,
+      is_public: template.is_public || false,
+    }).select().single()
+
+    if (error || !plan) return { data: null, error }
+
+    for (let d = 1; d <= template.total_days; d++) {
+      const type = template.dayTypes?.[d - 1] || getDayType(d)
+      const dayName = getDayName(d)
+      const label = type === 'rest' ? `${dayName} - Descanso` : `${dayName} - Entrenamiento`
+      await supabase.from('plan_days').insert({
+        plan_id: plan.id,
+        day_number: d,
+        type,
+        name: label,
+      })
+    }
+
+    if (template.warmup) {
+      const { data: days } = await supabase.from('plan_days')
+        .select('*').eq('plan_id', plan.id).eq('type', 'training')
+
+      if (days) {
+        for (const day of days) {
+          for (const ex of WARMUP_EXERCISES) {
+            let { data: existing } = await supabase.from('exercises')
+              .select('id').eq('name', ex.name).eq('muscle_group', ex.muscle_group).limit(1)
+
+            let exerciseId
+            if (existing && existing.length > 0) {
+              exerciseId = existing[0].id
+            } else {
+              const { data: newEx } = await supabase.from('exercises').insert({
+                user_id: user.id,
+                name: ex.name,
+                muscle_group: ex.muscle_group,
+                equipment: ex.equipment,
+                difficulty: ex.difficulty,
+                is_public: true,
+              }).select('id').single()
+              exerciseId = newEx?.id
+            }
+
+            if (exerciseId) {
+              const { data: existingPde } = await supabase.from('plan_day_exercises')
+                .select('order_index').eq('plan_day_id', day.id).order('order_index', { ascending: false }).limit(1)
+              const nextOrder = existingPde?.length ? (existingPde[0].order_index + 1) : 0
+
+              await supabase.from('plan_day_exercises').insert({
+                plan_day_id: day.id,
+                exercise_id: exerciseId,
+                sets: ex.sets,
+                reps: ex.reps,
+                rest_seconds: ex.rest_seconds,
+                order_index: nextOrder,
+              })
+            }
+          }
+        }
+      }
+    }
+
+    return { data: plan, error: null }
+  }, [user])
+
+  // ── CLONAR PLAN PÚBLICO ──────────────────────
+  const clonePlan = useCallback(async (planId) => {
+    const { data: original } = await supabase.from('plans')
+      .select('*').eq('id', planId).single()
+    if (!original) return { data: null, error: 'Plan no encontrado' }
+
+    const { data: clone, error } = await supabase.from('plans').insert({
+      user_id: user.id,
+      name: `Copia de ${original.name}`,
+      description: original.description,
+      total_days: original.total_days,
+      is_public: false,
+    }).select().single()
+
+    if (error || !clone) return { data: null, error }
+
+    const { data: originalDays } = await supabase.from('plan_days')
+      .select(`*, exercises:plan_day_exercises(*, exercise:exercises(*))`)
+      .eq('plan_id', planId).order('day_number')
+
+    if (originalDays) {
+      for (const day of originalDays) {
+        const { data: newDay } = await supabase.from('plan_days').insert({
+          plan_id: clone.id,
+          day_number: day.day_number,
+          type: day.type,
+          name: day.name,
+        }).select('id').single()
+
+        if (newDay && day.exercises) {
+          for (const pde of day.exercises) {
+            let exerciseId = pde.exercise_id
+
+            if (pde.exercise?.user_id !== user.id) {
+              const { data: existing } = await supabase.from('exercises')
+                .select('id').eq('name', pde.exercise?.name).limit(1)
+              if (existing && existing.length > 0) {
+                exerciseId = existing[0].id
+              } else if (pde.exercise) {
+                const { data: newEx } = await supabase.from('exercises').insert({
+                  user_id: user.id,
+                  name: pde.exercise.name,
+                  description: pde.exercise.description,
+                  youtube_url: pde.exercise.youtube_url,
+                  muscle_group: pde.exercise.muscle_group,
+                  equipment: pde.exercise.equipment,
+                  difficulty: pde.exercise.difficulty,
+                  is_public: false,
+                }).select('id').single()
+                exerciseId = newEx?.id
+              }
+            }
+
+            if (exerciseId) {
+              const { data: existingPde } = await supabase.from('plan_day_exercises')
+                .select('order_index').eq('plan_day_id', newDay.id).order('order_index', { ascending: false }).limit(1)
+              const nextOrder = existingPde?.length ? (existingPde[0].order_index + 1) : 0
+
+              await supabase.from('plan_day_exercises').insert({
+                plan_day_id: newDay.id,
+                exercise_id: exerciseId,
+                sets: pde.sets,
+                reps: pde.reps,
+                rest_seconds: pde.rest_seconds,
+                order_index: nextOrder,
+                note: pde.note,
+                superset_group: pde.superset_group,
+              })
+            }
+          }
+        }
+      }
+    }
+
+    return { data: clone, error: null }
+  }, [user])
+
   return {
     myPlans, activePlan, loading,
     loadPlans, getPublicPlans, createPlan, updatePlan, deletePlan, setActivePlan,
     getPlanDays, upsertDay, deleteDay,
     addExerciseToDay, updateExerciseInDay, removeExerciseFromDay,
-    toggleLike, getUserLikes
+    createSupersetGroup, addExerciseToSuperset, deleteSupersetGroup,
+    toggleLike, getUserLikes,
+    createPlanFromTemplate, clonePlan
   }
 }

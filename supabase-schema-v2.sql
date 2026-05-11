@@ -73,10 +73,11 @@ create table plan_day_exercises (
   plan_day_id uuid references plan_days(id) on delete cascade,
   exercise_id uuid references exercises(id) on delete cascade,
   sets int default 3,
-  reps text default '12',         -- puede ser "12" o "30s"
+  reps text default '12',         -- puede ser "12", "30s", "1min"
   rest_seconds int default 45,
-  duration_seconds int,           -- para ejercicios de tiempo
   order_index int default 0,
+  note text,                      -- nota libre para el ejercicio
+  superset_group text,            -- ID del grupo de superserie
   created_at timestamptz default now()
 );
 
@@ -111,6 +112,18 @@ create table user_active_plan (
   started_at timestamptz default now()
 );
 
+-- ── MÉTRICAS CORPORALES ───────────────────────
+create table user_metrics (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
+  weight decimal(5,2),
+  waist decimal(5,2),
+  hips decimal(5,2),
+  chest decimal(5,2),
+  arms decimal(5,2),
+  recorded_at timestamptz default now()
+);
+
 -- =============================================
 -- ROW LEVEL SECURITY
 -- =============================================
@@ -124,6 +137,7 @@ alter table plan_day_exercises enable row level security;
 alter table progress enable row level security;
 alter table series_log enable row level security;
 alter table user_active_plan enable row level security;
+alter table user_metrics enable row level security;
 
 -- Exercises: ver propios + públicos, editar solo propios
 create policy "exercises_select" on exercises for select
@@ -212,6 +226,7 @@ create policy "pde_delete" on plan_day_exercises for delete
 create policy "progress_all" on progress for all using (auth.uid() = user_id);
 create policy "series_log_all" on series_log for all using (auth.uid() = user_id);
 create policy "uap_all" on user_active_plan for all using (auth.uid() = user_id);
+create policy "user_metrics_all" on user_metrics for all using (auth.uid() = user_id);
 
 -- =============================================
 -- FUNCIONES

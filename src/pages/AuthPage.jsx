@@ -1,27 +1,63 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { useToast } from '../context/ToastContext'
 
 export default function AuthPage() {
   const { signIn, signUp } = useAuth()
-  const [mode, setMode] = useState('login') // 'login' | 'register'
+  const toast = useToast()
+  const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  const validate = () => {
+    if (mode === 'register' && !form.name.trim()) {
+      setError('Ingresa tu nombre')
+      return false
+    }
+    if (!form.email.trim()) {
+      setError('Ingresa tu email')
+      return false
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      setError('Email inválido')
+      return false
+    }
+    if (form.password.length < 6) {
+      setError('La contraseña debe tener al menos 6 caracteres')
+      return false
+    }
+    return true
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    
+    if (!validate()) return
+    
     setLoading(true)
-    if (mode === 'login') {
-      const { error } = await signIn(form.email, form.password)
-      if (error) setError(error.message)
-    } else {
-      if (!form.name) { setError('Ingresa tu nombre'); setLoading(false); return }
-      const { error } = await signUp(form.email, form.password, form.name)
-      if (error) setError(error.message)
-      else setError('✓ Revisa tu email para confirmar tu cuenta')
+    try {
+      if (mode === 'login') {
+        const { error } = await signIn(form.email, form.password)
+        if (error) {
+          setError(error.message)
+          toast.error(error.message)
+        }
+      } else {
+        const { error } = await signUp(form.email, form.password, form.name)
+        if (error) {
+          setError(error.message)
+          toast.error(error.message)
+        } else {
+          toast.success('Cuenta creada. Revisa tu email para confirmar.')
+        }
+      }
+    } catch (err) {
+      setError('Error inesperado')
+      toast.error('Error inesperado')
     }
     setLoading(false)
   }
