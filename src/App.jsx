@@ -1,13 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense, lazy } from 'react'
 import { useAuth } from './hooks/useAuth'
 import { usePlansV2 } from './hooks/usePlansV2'
 import AuthPage from './pages/AuthPage'
-import HomePage from './pages/HomePage'
-import PlansPageV2 from './pages/PlansPageV2'
-import PlanBuilderPage from './pages/PlanBuilderPage'
-import ExercisesPage from './pages/ExercisesPage'
-import PlayerPage from './pages/PlayerPage'
-import ProfilePage from './pages/ProfilePage'
+
+const HomePage = lazy(() => import('./pages/HomePage'))
+const PlansPageV2 = lazy(() => import('./pages/PlansPageV2'))
+const PlanBuilderPage = lazy(() => import('./pages/PlanBuilderPage'))
+const ExercisesPage = lazy(() => import('./pages/ExercisesPage'))
+const PlayerPage = lazy(() => import('./pages/PlayerPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+
+function PageLoader() {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+      <div className="dots"><div className="dot" /><div className="dot" /><div className="dot" /></div>
+    </div>
+  )
+}
 
 export default function App() {
   const { user, loading } = useAuth()
@@ -21,12 +30,7 @@ export default function App() {
     localStorage.setItem('theme', darkMode ? 'dark' : 'light')
   }, [darkMode])
 
-  if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <div className="dots"><div className="dot" /><div className="dot" /><div className="dot" /></div>
-    </div>
-  )
-
+  if (loading) return <PageLoader />
   if (!user) return <AuthPage />
 
   const navigate = (to, params = null) => {
@@ -37,12 +41,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      {page === 'home' && <HomePage activePlan={activePlan} onNavigate={navigate} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />}
-      {page === 'plans' && <PlansPageV2 onNavigate={navigate} />}
-      {page === 'plan-builder' && pageParams?.planId && <PlanBuilderPage planId={pageParams.planId} onNavigate={navigate} />}
-      {page === 'exercises' && <ExercisesPage onNavigate={navigate} />}
-      {page === 'player' && pageParams && <PlayerPage {...pageParams} onBack={() => setPage('home')} onComplete={() => setPage('home')} />}
-      {page === 'profile' && <ProfilePage onNavigate={navigate} />}
+      <Suspense fallback={<PageLoader />}>
+        {page === 'home' && <HomePage activePlan={activePlan} onNavigate={navigate} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />}
+        {page === 'plans' && <PlansPageV2 onNavigate={navigate} />}
+        {page === 'plan-builder' && pageParams?.planId && <PlanBuilderPage planId={pageParams.planId} onNavigate={navigate} />}
+        {page === 'exercises' && <ExercisesPage onNavigate={navigate} />}
+        {page === 'player' && pageParams && <PlayerPage {...pageParams} onBack={() => setPage('home')} onComplete={() => setPage('home')} />}
+        {page === 'profile' && <ProfilePage onNavigate={navigate} />}
+      </Suspense>
 
       {page !== 'player' && (
         <div className="bottom-nav">

@@ -1,13 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { usePlansV2 } from '../hooks/usePlansV2'
 import { useExercises } from '../hooks/useExercises'
 
 const MUSCLE_ES = { chest: 'Pecho', back: 'Espalda', legs: 'Piernas', shoulders: 'Hombros', arms: 'Brazos', core: 'Core', cardio: 'Cardio', full_body: 'Cuerpo completo' }
 
-function ExerciseConfigModal({ pde, onSave, onClose, allExercises }) {
-  const isSupersetLeader = pde.superset_group && (!pde.sets || pde.sets === null)
-  const isSupersetMember = pde.superset_group && pde.sets != null
+const PAGE_SIZE = 25
 
+function ExerciseConfigModal({ pde, onSave, onClose }) {
   const [config, setConfig] = useState({
     sets: pde.sets || 3,
     reps: pde.reps || '12',
@@ -33,14 +32,11 @@ function ExerciseConfigModal({ pde, onSave, onClose, allExercises }) {
           <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>{pde.exercise?.name}</div>
           {pde.superset_group && <span className="tag tag-primary">🔗 Superserie</span>}
         </div>
-
-        {/* Toggle Reps / Tiempo */}
         <div className="sec-lbl">Tipo</div>
         <div className="chip-row" style={{ marginBottom: 14 }}>
           <button className={`chip ${repType === 'reps' ? 'on' : ''}`} onClick={() => setRepType('reps')}>Reps</button>
           <button className={`chip ${repType === 'time' ? 'on' : ''}`} onClick={() => setRepType('time')}>Tiempo</button>
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Series</label>
@@ -55,13 +51,10 @@ function ExerciseConfigModal({ pde, onSave, onClose, allExercises }) {
             <input className="input" type="number" min={0} max={300} value={config.rest_seconds} onChange={e => set('rest_seconds', +e.target.value)} />
           </div>
         </div>
-
-        {/* Nota */}
         <div className="form-group">
           <label className="form-label">📝 Nota (opcional)</label>
           <textarea className="input" style={{ minHeight: 50, resize: 'none' }} value={config.note} onChange={e => set('note', e.target.value)} placeholder="Ej: Superserie con press banca, agarrar mancuernas pesadas..." />
         </div>
-
         <button className="btn btn-primary" onClick={handleSubmit}>Guardar</button>
         <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={onClose}>Cancelar</button>
       </div>
@@ -91,8 +84,6 @@ function SupersetConfigModal({ pde, exercises, onSave, onClose, onRemoveExercise
           <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>🔗 Superserie</div>
           <span className="tag tag-primary">{exercises.length} ejercicios</span>
         </div>
-
-        {/* Ejercicios del grupo */}
         <div style={{ marginBottom: 14 }}>
           <div className="sec-lbl" style={{ marginBottom: 6 }}>Ejercicios</div>
           {exercises.map((ex, i) => (
@@ -106,7 +97,6 @@ function SupersetConfigModal({ pde, exercises, onSave, onClose, onRemoveExercise
           ))}
           <button className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => setShowPicker(true)}>+ Agregar ejercicio</button>
         </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
           <div>
             <label className="form-label">Series</label>
@@ -121,15 +111,12 @@ function SupersetConfigModal({ pde, exercises, onSave, onClose, onRemoveExercise
             <input className="input" type="number" min={0} max={300} value={config.rest_seconds} onChange={e => set('rest_seconds', +e.target.value)} />
           </div>
         </div>
-
         <div className="form-group">
           <label className="form-label">📝 Nota (opcional)</label>
           <textarea className="input" style={{ minHeight: 50, resize: 'none' }} value={config.note} onChange={e => set('note', e.target.value)} placeholder="Ej: Superserie de empuje..." />
         </div>
-
         <button className="btn btn-primary" onClick={handleSubmit}>Guardar</button>
         <button className="btn btn-secondary" style={{ marginTop: 8 }} onClick={onClose}>Cancelar</button>
-
         {showPicker && (
           <ExercisePickerModal onSelect={(ex) => { onAddExercise(ex); setShowPicker(false) }} onClose={() => setShowPicker(false)} />
         )}
@@ -142,10 +129,26 @@ function ExercisePickerModal({ onSelect, onClose }) {
   const { searchExercises, myExercises } = useExercises()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(myExercises)
+  const [searching, setSearching] = useState(false)
+  const [page, setPage] = useState(1)
+  const debounceRef = useRef(null)
 
-  const handleSearch = async () => {
-    const data = await searchExercises(query)
+  const visibleResults = useMemo(() => results.slice(0, page * PAGE_SIZE), [results, page])
+  const hasMore = visibleResults.length < results.length
+
+  const handleSearch = useCallback(async (q) => {
+    setSearching(true)
+    setPage(1)
+    const data = await searchExercises(q)
     setResults(data)
+    setSearching(false)
+  }, [searchExercises])
+
+  const handleChange = (e) => {
+    const v = e.target.value
+    setQuery(v)
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => handleSearch(v), 300)
   }
 
   return (
@@ -156,13 +159,11 @@ function ExercisePickerModal({ onSelect, onClose }) {
             <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>Agregar ejercicio</div>
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 20, cursor: 'pointer' }}>✕</button>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input className="input" placeholder="Buscar..." value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} style={{ flex: 1 }} />
-            <button className="btn btn-primary" style={{ width: 'auto', padding: '0 14px' }} onClick={handleSearch}>🔍</button>
-          </div>
+          <input className="input" placeholder="Buscar..." value={query} onChange={handleChange} style={{ width: '100%' }} autoFocus />
         </div>
         <div style={{ overflowY: 'auto', flex: 1, padding: 12 }}>
-          {results.map(ex => (
+          {searching && <div style={{ textAlign: 'center', padding: 20, color: 'var(--t2)', fontSize: 13 }}>Buscando...</div>}
+          {!searching && visibleResults.map(ex => (
             <div key={ex.id} onClick={() => onSelect(ex)} style={{ padding: '11px 14px', borderRadius: 'var(--rm)', border: '0.5px solid var(--bd)', marginBottom: 8, cursor: 'pointer', background: 'var(--surface)' }}>
               <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t1)' }}>{ex.name}</div>
               <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
@@ -171,15 +172,37 @@ function ExercisePickerModal({ onSelect, onClose }) {
               </div>
             </div>
           ))}
-          {results.length === 0 && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24, fontSize: 13 }}>Sin resultados — busca o crea ejercicios primero</div>}
+          {!searching && hasMore && (
+            <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => setPage(p => p + 1)}>
+              Cargar más ({results.length - visibleResults.length} restantes)
+            </button>
+          )}
+          {!searching && results.length === 0 && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24, fontSize: 13 }}>Sin resultados — busca o crea ejercicios primero</div>}
         </div>
       </div>
     </div>
   )
 }
 
+const getGroupedExercises = (exercises) => {
+  const groups = []
+  const seen = new Set()
+  for (const ex of exercises) {
+    if (seen.has(ex.id)) continue
+    if (ex.superset_group) {
+      const group = exercises.filter(e => e.superset_group === ex.superset_group)
+      groups.push({ type: 'superset', group, groupId: ex.superset_group })
+      group.forEach(e => seen.add(e.id))
+    } else {
+      groups.push({ type: 'exercise', exercise: ex })
+      seen.add(ex.id)
+    }
+  }
+  return groups
+}
+
 export default function PlanBuilderPage({ planId, onNavigate }) {
-  const { getPlanDays, upsertDay, deleteDay, addExerciseToDay, updateExerciseInDay, removeExerciseFromDay, createSupersetGroup, addExerciseToSuperset, deleteSupersetGroup, myPlans } = usePlansV2()
+  const { getPlanDays, upsertDay, deleteDay, addExerciseToDay, updateExerciseInDay, removeExerciseFromDay, addExerciseToSuperset, deleteSupersetGroup, myPlans } = usePlansV2()
   const plan = myPlans.find(p => p.id === planId)
   const [days, setDays] = useState([])
   const [loading, setLoading] = useState(true)
@@ -200,7 +223,15 @@ export default function PlanBuilderPage({ planId, onNavigate }) {
     const data = await getPlanDays(planId)
     setDays(data)
     setLoading(false)
+    return data
   }
+
+  const refreshSelectedDay = useCallback(async (daysData) => {
+    const data = daysData || await getPlanDays(planId)
+    const updated = data.find(d => d.id === selectedDay.id)
+    setDays(data)
+    if (updated) setSelectedDay(updated)
+  }, [planId, selectedDay])
 
   const handleAddDay = async (type = 'training') => {
     const num = parseInt(newDayNum)
@@ -220,9 +251,8 @@ export default function PlanBuilderPage({ planId, onNavigate }) {
     if (!selectedDay) return
     setShowPicker(false)
     await addExerciseToDay(selectedDay.id, exercise.id)
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
+    const data = await loadDays()
+    refreshSelectedDay(data)
   }
 
   const handleUpdatePde = async (config) => {
@@ -231,9 +261,8 @@ export default function PlanBuilderPage({ planId, onNavigate }) {
     } else if (editingSuperset) {
       await updateExerciseInDay(editingSuperset.id, config)
     }
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
+    const data = await loadDays()
+    refreshSelectedDay(data)
     setEditingPde(null)
     setEditingSuperset(null)
   }
@@ -241,71 +270,43 @@ export default function PlanBuilderPage({ planId, onNavigate }) {
   const handleAddExerciseToSuperset = async (exercise) => {
     if (!editingSuperset) return
     await addExerciseToSuperset(selectedDay.id, editingSuperset.superset_group, exercise.id)
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
+    const data = await loadDays()
+    refreshSelectedDay(data)
   }
 
   const handleSelectSupersetLeader = async (exercise) => {
     setShowSupersetPicker(false)
     const groupId = pendingSupersetGroup || `ss_${Date.now()}`
     await addExerciseToDay(selectedDay.id, exercise.id, { sets: 3, reps: '12', rest_seconds: 45, superset_group: groupId })
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
+    const data = await loadDays()
+    refreshSelectedDay(data)
     setPendingSupersetGroup(null)
   }
 
   const handleRemovePde = async (pdeId) => {
     await removeExerciseFromDay(pdeId)
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
+    const data = await loadDays()
+    refreshSelectedDay(data)
   }
 
   const handleRemoveFromSuperset = async (pdeId) => {
     await removeExerciseFromDay(pdeId)
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
-  }
-
-  const handleCreateSuperset = async () => {
-    if (!selectedDay) return
-    const { data: exercise } = await addExerciseToDay(selectedDay.id, null, { sets: 3, reps: '12', rest_seconds: 45 })
-    // This is a simplified approach - user adds more exercises via the modal
-    await loadDays()
+    const data = await loadDays()
+    refreshSelectedDay(data)
   }
 
   const handleDeleteSuperset = async (groupId) => {
     if (!confirm('¿Eliminar toda la superserie?')) return
     await deleteSupersetGroup(groupId)
-    await loadDays()
-    const updated = (await getPlanDays(planId)).find(d => d.id === selectedDay.id)
-    setSelectedDay(updated)
-  }
-
-  // Agrupar ejercicios por superserie
-  const getGroupedExercises = (exercises) => {
-    const groups = []
-    const seen = new Set()
-
-    for (const ex of exercises) {
-      if (seen.has(ex.id)) continue
-      if (ex.superset_group) {
-        const group = exercises.filter(e => e.superset_group === ex.superset_group)
-        groups.push({ type: 'superset', group, groupId: ex.superset_group })
-        group.forEach(e => seen.add(e.id))
-      } else {
-        groups.push({ type: 'exercise', exercise: ex })
-        seen.add(ex.id)
-      }
-    }
-    return groups
+    const data = await loadDays()
+    refreshSelectedDay(data)
   }
 
   const curDay = selectedDay ? days.find(d => d.id === selectedDay.id) : null
-  const groupedExercises = curDay ? getGroupedExercises(curDay.exercises || []) : []
+  const groupedExercises = useMemo(() =>
+    curDay ? getGroupedExercises(curDay.exercises || []) : [],
+    [curDay?.id, curDay?.exercises]
+  )
 
   return (
     <div>

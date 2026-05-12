@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, memo } from 'react'
 import { useExercises } from '../hooks/useExercises'
 import ExerciseGif from '../components/ExerciseGif'
 import { useYouTubeSearch, useDebounce } from '../hooks/useYouTubeSearch'
@@ -8,18 +8,13 @@ const MUSCLES = ['chest', 'back', 'legs', 'glutes', 'shoulders', 'arms', 'core',
 const EQUIPMENT = ['none', 'dumbbells', 'barbell', 'machine', 'bands', 'bodyweight']
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced']
 const MUSCLE_ES = { 
-  chest: 'Pecho', 
-  back: 'Espalda', 
-  legs: 'Piernas', 
-  glutes: 'Glúteos',
-  shoulders: 'Hombros', 
-  arms: 'Brazos', 
-  core: 'Core', 
-  cardio: 'Cardio', 
-  full_body: 'Cuerpo completo' 
+  chest: 'Pecho', back: 'Espalda', legs: 'Piernas', glutes: 'Glúteos',
+  shoulders: 'Hombros', arms: 'Brazos', core: 'Core', cardio: 'Cardio', full_body: 'Cuerpo completo' 
 }
 const EQUIP_ES = { none: 'Sin equipo', dumbbells: 'Mancuernas', barbell: 'Barra', machine: 'Máquina', bands: 'Bandas', bodyweight: 'Peso corporal' }
 const DIFF_ES = { beginner: 'Principiante', intermediate: 'Intermedio', advanced: 'Avanzado' }
+
+const EXERCISES_PER_PAGE = 15
 
 function ExerciseForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { name: '', description: '', youtube_url: '', muscle_group: '', equipment: 'bodyweight', difficulty: 'beginner', is_public: false })
@@ -31,15 +26,12 @@ function ExerciseForm({ initial, onSave, onCancel }) {
   const handleSubmit = async () => {
     if (!form.name.trim()) return
     setSaving(true)
-    
-    // Auto-search YouTube if no URL provided
     if (!form.youtube_url && form.name.trim()) {
       setAutoSearching(true)
       const ytUrl = await ytSearch(form.name)
       if (ytUrl) set('youtube_url', ytUrl)
       setAutoSearching(false)
     }
-    
     await onSave(form)
     setSaving(false)
   }
@@ -93,16 +85,43 @@ function ExerciseForm({ initial, onSave, onCancel }) {
   )
 }
 
-function ExerciseCard({ ex, onLike, liked, onEdit, onDelete, showActions = false }) {
+function VideoThumb({ ytId, ex }) {
+  const [showVideo, setShowVideo] = useState(false)
+
+  if (!showVideo) {
+    return (
+      <div
+        onClick={() => setShowVideo(true)}
+        style={{ position: 'relative', paddingBottom: '56.25%', background: '#000', borderRadius: 'var(--r) var(--r) 0 0', overflow: 'hidden', cursor: 'pointer' }}
+      >
+        <img
+          src={`https://img.youtube.com/vi/${ytId}/hqdefault.jpg`}
+          alt={ex.name}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          loading="lazy"
+        />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 0, height: 0, borderTop: '10px solid transparent', borderBottom: '10px solid transparent', borderLeft: '16px solid white', marginLeft: 3 }} />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'relative', paddingBottom: '56.25%', background: '#000', borderRadius: 'var(--r) var(--r) 0 0', overflow: 'hidden' }}>
+      <iframe src={`https://www.youtube.com/embed/${ytId}?autoplay=1`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }} allow="accelerometer; autoplay; encrypted-media" allowFullScreen />
+    </div>
+  )
+}
+
+const ExerciseCard = memo(({ ex, onLike, liked, onEdit, onDelete, showActions = false }) => {
   const ytId = ex.youtube_url?.match(/(?:v=|youtu\.be\/)([^&?/]+)/)?.[1]
 
   return (
     <div className="card" style={{ marginBottom: 10, cursor: 'default' }}>
-      {ytId && (
-        <div style={{ position: 'relative', paddingBottom: '56.25%', background: '#000', borderRadius: 'var(--r) var(--r) 0 0', overflow: 'hidden' }}>
-          <iframe src={`https://www.youtube.com/embed/${ytId}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }} allow="accelerometer; autoplay; encrypted-media" allowFullScreen />
-        </div>
-      )}
+      {ytId && <VideoThumb ytId={ytId} ex={ex} />}
       <div style={{ padding: '12px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           {!ytId && <ExerciseGif exerciseName={ex.name} />}
@@ -132,33 +151,43 @@ function ExerciseCard({ ex, onLike, liked, onEdit, onDelete, showActions = false
       </div>
     </div>
   )
-}
+})
 
 export default function ExercisesPage({ onNavigate }) {
-  const { myExercises, publicExercises, loading, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
-  const [tab, setTab] = useState('explore') // explore | mine
-  const [view, setView] = useState('list') // list | create | edit
+  const { myExercises, publicExercises, loading, hasMore, loadMore, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
+  const [tab, setTab] = useState('explore')
+  const [view, setView] = useState('list')
   const [editing, setEditing] = useState(null)
   const [likedIds, setLikedIds] = useState([])
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 400)
   const [results, setResults] = useState(null)
   const [filterMuscle, setFilterMuscle] = useState('')
+  const [page, setPage] = useState(0)
+  const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     getUserLikes().then(setLikedIds)
   }, [])
 
   useEffect(() => {
-    if (debouncedSearch || filterMuscle) {
-      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined }).then(setResults)
+    if ((debouncedSearch || filterMuscle) && tab === 'explore') {
+      setSearching(true)
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined }).then(data => {
+        setResults(data)
+        setSearching(false)
+      })
+    } else if (tab === 'mine') {
+      setSearching(true)
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined, myOnly: true }).then(data => {
+        setResults(data)
+        setSearching(false)
+      })
+    } else {
+      setResults(null)
+      setSearching(false)
     }
-  }, [debouncedSearch, filterMuscle])
-
-  const handleSearch = async () => {
-    const data = await searchExercises(search, { muscle_group: filterMuscle || undefined })
-    setResults(data)
-  }
+  }, [debouncedSearch, filterMuscle, tab])
 
   const handleLike = async (id) => {
     const nowLiked = await toggleLike(id)
@@ -176,6 +205,17 @@ export default function ExercisesPage({ onNavigate }) {
     setView('list')
   }
 
+  const baseList = results !== null ? results : (tab === 'mine' ? myExercises : publicExercises)
+  const paginatedList = useMemo(() => baseList.slice(0, (page + 1) * EXERCISES_PER_PAGE), [baseList, page])
+  const paginatedHasMore = paginatedList.length < baseList.length
+
+  const handleLoadMore = () => {
+    if (results === null && hasMore && baseList.length === myExercises.length && tab === 'mine') {
+      loadMore()
+    }
+    setPage(p => p + 1)
+  }
+
   if (view === 'create') return (
     <div>
       <div className="hdr"><button className="btn-ghost" onClick={() => setView('list')}>‹</button><div><div className="hdr-title">Nuevo ejercicio</div></div></div>
@@ -190,7 +230,7 @@ export default function ExercisesPage({ onNavigate }) {
     </div>
   )
 
-  const displayList = results !== null ? results : (tab === 'mine' ? myExercises : publicExercises)
+  const isSearching = debouncedSearch || filterMuscle
 
   return (
     <div>
@@ -202,31 +242,23 @@ export default function ExercisesPage({ onNavigate }) {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="tog" style={{ margin: '10px 16px' }}>
-        <button className={`toggle-btn ${tab === 'explore' ? 'on' : ''}`} onClick={() => { setTab('explore'); setResults(null) }}>Explorar</button>
-        <button className={`toggle-btn ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setResults(null) }}>Mis ejercicios</button>
+        <button className={`toggle-btn ${tab === 'explore' ? 'on' : ''}`} onClick={() => { setTab('explore'); setResults(null); setPage(0); setSearch(''); setFilterMuscle('') }}>Explorar</button>
+        <button className={`toggle-btn ${tab === 'mine' ? 'on' : ''}`} onClick={() => { setTab('mine'); setResults(null); setPage(0); setSearch(''); setFilterMuscle('') }}>Mis ejercicios</button>
       </div>
 
-      {/* Búsqueda */}
-      {tab === 'explore' && (
-        <div style={{ padding: '0 16px 8px' }}>
-          <input className="input" placeholder="Buscar ejercicio..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%' }} />
-          <div className="chip-row" style={{ marginTop: 8 }}>
-            <button className={`chip ${filterMuscle === '' ? 'on' : ''}`} onClick={() => setFilterMuscle('')}>Todos</button>
-            {MUSCLES.map(m => <button key={m} className={`chip ${filterMuscle === m ? 'on' : ''}`} onClick={() => setFilterMuscle(m)}>{MUSCLE_ES[m]}</button>)}
-          </div>
+      <div style={{ padding: '0 16px 8px' }}>
+        <input className="input" placeholder="Buscar ejercicio..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%' }} />
+        <div className="chip-row" style={{ marginTop: 8 }}>
+          <button className={`chip ${filterMuscle === '' ? 'on' : ''}`} onClick={() => setFilterMuscle('')}>Todos</button>
+          {MUSCLES.map(m => <button key={m} className={`chip ${filterMuscle === m ? 'on' : ''}`} onClick={() => setFilterMuscle(m)}>{MUSCLE_ES[m]}</button>)}
         </div>
-      )}
+      </div>
 
-      {/* Lista */}
       <div className="sec" style={{ paddingBottom: 24 }}>
-        {loading && (
-          <div>
-            {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
-          </div>
-        )}
-        {!loading && displayList.length === 0 && (
+        {loading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+        {searching && !loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--t2)', fontSize: 13 }}>Buscando...</div>}
+        {!loading && !searching && baseList.length === 0 && (
           <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--t2)' }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>💪</div>
             <div style={{ fontSize: 14, color: 'var(--t1)', fontWeight: 500, marginBottom: 4 }}>
@@ -235,7 +267,7 @@ export default function ExercisesPage({ onNavigate }) {
             {tab === 'mine' && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setView('create')}>Crear primer ejercicio</button>}
           </div>
         )}
-        {displayList.map(ex => (
+        {!loading && !searching && paginatedList.map(ex => (
           <ExerciseCard
             key={ex.id}
             ex={ex}
@@ -246,6 +278,11 @@ export default function ExercisesPage({ onNavigate }) {
             onDelete={deleteExercise}
           />
         ))}
+        {!loading && !searching && paginatedHasMore && (
+          <button className="btn btn-secondary" style={{ width: '100%', marginTop: 8 }} onClick={handleLoadMore}>
+            Cargar más ({baseList.length - paginatedList.length} restantes)
+          </button>
+        )}
       </div>
     </div>
   )

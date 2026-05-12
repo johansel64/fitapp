@@ -1,9 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { usePlansV2 } from '../hooks/usePlansV2'
 import TemplatePicker from '../components/TemplatePicker'
 import { useDebounce } from '../hooks/useYouTubeSearch'
 import { SkeletonCard } from '../components/Skeleton'
 import { useToast } from '../context/ToastContext'
+
+function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onClone, cloning, onLike, onDelete }) {
+  return (
+    <div style={{ background: 'var(--surface)', border: activePlanId === plan.id ? '2px solid var(--pr)' : '0.5px solid var(--bd)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>{plan.name}</div>
+          {plan.description && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 3, lineHeight: 1.4 }}>{plan.description}</div>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {activePlanId === plan.id && <span className="tag tag-primary">Activo</span>}
+        <span className="tag">{plan.total_days} días</span>
+        {plan.is_public && <span className="tag tag-green">Público</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {activePlanId !== plan.id && (
+          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onActivate}>Activar</button>
+        )}
+        {isOwn && (
+          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onEdit}>Editar días</button>
+        )}
+        {!isOwn && (
+          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onClone} disabled={cloning}>
+            {cloning ? 'Copiando...' : '📋 Copiar'}
+          </button>
+        )}
+        <button onClick={onLike} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '0.5px solid var(--bd)', borderRadius: 'var(--rm)', padding: '6px 10px', cursor: 'pointer', color: likedIds.includes(plan.id) ? 'var(--pr)' : 'var(--t2)', fontSize: 13 }}>
+          {likedIds.includes(plan.id) ? '❤️' : '🤍'} {plan.likes_count || 0}
+        </button>
+        {isOwn && (
+          <button className="btn btn-secondary btn-sm" style={{ color: 'var(--pr-d)' }} onClick={onDelete}>Eliminar</button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function PlansPageV2({ onNavigate }) {
   const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan } = usePlansV2()
@@ -17,20 +54,23 @@ export default function PlansPageV2({ onNavigate }) {
   const [cloning, setCloning] = useState(null)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 400)
+  const abortRef = useRef(null)
+
+  const loadPublic = useCallback(async () => {
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const data = await getPublicPlans(debouncedSearch)
+    if (!controller.signal.aborted) setPublicPlans(data)
+  }, [debouncedSearch, getPublicPlans])
 
   useEffect(() => {
     getUserLikes().then(setLikedIds)
-    if (tab === 'explore') loadPublic()
-  }, [tab])
+  }, [])
 
   useEffect(() => {
     if (tab === 'explore') loadPublic()
-  }, [debouncedSearch])
-
-  const loadPublic = async () => {
-    const data = await getPublicPlans(debouncedSearch)
-    setPublicPlans(data)
-  }
+  }, [tab, loadPublic])
 
   const handleCreate = async () => {
     if (!form.name.trim()) return
@@ -66,52 +106,6 @@ export default function PlansPageV2({ onNavigate }) {
     toast.success(`Plan "${planName}" copiado con éxito`)
     onNavigate('plan-builder', { planId: data.id })
   }
-
-  const PlanCard = ({ plan, isOwn = false }) => (
-    <div style={{ background: 'var(--surface)', border: activePlan?.id === plan.id ? '2px solid var(--pr)' : '0.5px solid var(--bd)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>{plan.name}</div>
-          {plan.description && <div style={{ fontSize: 13, color: 'var(--t2)', marginTop: 3, lineHeight: 1.4 }}>{plan.description}</div>}
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        {activePlan?.id === plan.id && <span className="tag tag-primary">Activo</span>}
-        <span className="tag">{plan.total_days} días</span>
-        {plan.is_public && <span className="tag tag-green">Público</span>}
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {activePlan?.id !== plan.id && (
-          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={async () => { await setActivePlan(plan.id); onNavigate('home') }}>
-            Activar
-          </button>
-        )}
-        {isOwn && (
-          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => onNavigate('plan-builder', { planId: plan.id })}>
-            Editar días
-          </button>
-        )}
-        {!isOwn && (
-          <button
-            className="btn btn-secondary btn-sm"
-            style={{ flex: 1 }}
-            onClick={() => handleClone(plan.id, plan.name)}
-            disabled={cloning === plan.id}
-          >
-            {cloning === plan.id ? 'Copiando...' : '📋 Copiar'}
-          </button>
-        )}
-        <button onClick={() => !isOwn ? handleLike(plan.id) : null} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: '0.5px solid var(--bd)', borderRadius: 'var(--rm)', padding: '6px 10px', cursor: 'pointer', color: likedIds.includes(plan.id) ? 'var(--pr)' : 'var(--t2)', fontSize: 13 }}>
-          {likedIds.includes(plan.id) ? '❤️' : '🤍'} {plan.likes_count || 0}
-        </button>
-        {isOwn && (
-          <button className="btn btn-secondary btn-sm" style={{ color: 'var(--pr-d)' }} onClick={() => { if (confirm('¿Eliminar plan?')) deletePlan(plan.id) }}>
-            Eliminar
-          </button>
-        )}
-      </div>
-    </div>
-  )
 
   if (view === 'template') return (
     <TemplatePicker onPlanCreated={handleTemplateCreated} onCancel={() => setView('list')} />
@@ -180,11 +174,7 @@ export default function PlansPageV2({ onNavigate }) {
       )}
 
       <div className="sec" style={{ paddingBottom: 80 }}>
-        {loading && (
-          <div>
-            {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
-          </div>
-        )}
+        {loading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
 
         {tab === 'mine' && (
           <>
@@ -198,14 +188,27 @@ export default function PlansPageV2({ onNavigate }) {
                 </div>
               </div>
             )}
-            {myPlans.map(plan => <PlanCard key={plan.id} plan={plan} isOwn />)}
+            {myPlans.map(plan => (
+              <PlanCard key={plan.id} plan={plan} isOwn activePlanId={activePlan?.id} likedIds={likedIds}
+                onActivate={async () => { await setActivePlan(plan.id); onNavigate('home') }}
+                onEdit={() => onNavigate('plan-builder', { planId: plan.id })}
+                onLike={null}
+                onDelete={() => { if (confirm('¿Eliminar plan?')) deletePlan(plan.id) }}
+              />
+            ))}
           </>
         )}
 
         {tab === 'explore' && (
           <>
             {publicPlans.length === 0 && !loading && <div style={{ textAlign: 'center', color: 'var(--t2)', padding: 24, fontSize: 13 }}>No hay planes públicos aún</div>}
-            {publicPlans.map(plan => <PlanCard key={plan.id} plan={plan} />)}
+            {publicPlans.map(plan => (
+              <PlanCard key={plan.id} plan={plan} isOwn={false} activePlanId={activePlan?.id} likedIds={likedIds}
+                onActivate={async () => { await setActivePlan(plan.id); onNavigate('home') }}
+                onClone={() => handleClone(plan.id, plan.name)} cloning={cloning === plan.id}
+                onLike={() => handleLike(plan.id)}
+              />
+            ))}
           </>
         )}
       </div>

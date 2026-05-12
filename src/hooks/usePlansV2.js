@@ -41,13 +41,13 @@ export function usePlansV2() {
       description: plan.description || null,
       total_days: plan.total_days || 30,
       is_public: plan.is_public || false,
-    }).select().single()
+    }).select().maybeSingle()
     if (data) setMyPlans(prev => [data, ...prev])
     return { data, error }
   }, [user])
 
   const updatePlan = useCallback(async (id, updates) => {
-    const { data } = await supabase.from('plans').update(updates).eq('id', id).select().single()
+    const { data } = await supabase.from('plans').update(updates).eq('id', id).select().maybeSingle()
     if (data) setMyPlans(prev => prev.map(p => p.id === id ? data : p))
     return data
   }, [])
@@ -77,7 +77,7 @@ export function usePlansV2() {
   const upsertDay = useCallback(async (planId, dayNumber, type = 'training', name = null) => {
     const { data } = await supabase.from('plan_days').upsert({
       plan_id: planId, day_number: dayNumber, type, name
-    }, { onConflict: 'plan_id,day_number' }).select().single()
+    }, { onConflict: 'plan_id,day_number' }).select().maybeSingle()
     return data
   }, [])
 
@@ -191,62 +191,60 @@ export function usePlansV2() {
       description: template.description || null,
       total_days: template.total_days,
       is_public: template.is_public || false,
-    }).select().single()
+    }).select().maybeSingle()
 
     if (error || !plan) return { data: null, error }
 
+    const daysData = []
     for (let d = 1; d <= template.total_days; d++) {
       const type = template.dayTypes?.[d - 1] || getDayType(d)
       const dayName = getDayName(d)
       const label = type === 'rest' ? `${dayName} - Descanso` : `${dayName} - Entrenamiento`
-      await supabase.from('plan_days').insert({
-        plan_id: plan.id,
-        day_number: d,
-        type,
-        name: label,
-      })
+      daysData.push({ plan_id: plan.id, day_number: d, type, name: label })
     }
 
-    if (template.warmup) {
-      const { data: days } = await supabase.from('plan_days')
-        .select('*').eq('plan_id', plan.id).eq('type', 'training')
+    const { data: createdDays } = await supabase.from('plan_days')
+      .insert(daysData).select('*')
 
-      if (days) {
-        for (const day of days) {
-          for (const ex of WARMUP_EXERCISES) {
-            let { data: existing } = await supabase.from('exercises')
-              .select('id').eq('name', ex.name).eq('muscle_group', ex.muscle_group).limit(1)
+    if (template.warmup && createdDays) {
+      const trainingDays = createdDays.filter(d => d.type === 'training')
+      if (trainingDays.length > 0) {
+        const warmupNames = WARMUP_EXERCISES.map(e => e.name)
+        const { data: existingExercises } = await supabase.from('exercises')
+          .select('*').in('name', warmupNames).eq('muscle_group', ['full_body', 'cardio', 'core'])
 
-            let exerciseId
-            if (existing && existing.length > 0) {
-              exerciseId = existing[0].id
-            } else {
-              const { data: newEx } = await supabase.from('exercises').insert({
-                user_id: user.id,
-                name: ex.name,
-                muscle_group: ex.muscle_group,
-                equipment: ex.equipment,
-                difficulty: ex.difficulty,
-                is_public: true,
-              }).select('id').single()
-              exerciseId = newEx?.id
-            }
+        const existingMap = {}
+        if (existingExercises) existingExercises.forEach(e => { existingMap[e.name] = e.id })
 
+        const toCreate = []
+        WARMUP_EXERCISES.forEach(ex => {
+          if (!existingMap[ex.name]) toCreate.push({
+            user_id: user.id, name: ex.name, muscle_group: ex.muscle_group,
+            equipment: ex.equipment, difficulty: ex.difficulty, is_public: true,
+          })
+        })
+
+        if (toCreate.length > 0) {
+          const { data: newExercises } = await supabase.from('exercises').insert(toCreate).select('*')
+          if (newExercises) newExercises.forEach(e => { existingMap[e.name] = e.id })
+        }
+
+        const pdeData = []
+        trainingDays.forEach(day => {
+          WARMUP_EXERCISES.forEach((ex, idx) => {
+            const exerciseId = existingMap[ex.name]
             if (exerciseId) {
-              const { data: existingPde } = await supabase.from('plan_day_exercises')
-                .select('order_index').eq('plan_day_id', day.id).order('order_index', { ascending: false }).limit(1)
-              const nextOrder = existingPde?.length ? (existingPde[0].order_index + 1) : 0
-
-              await supabase.from('plan_day_exercises').insert({
-                plan_day_id: day.id,
-                exercise_id: exerciseId,
-                sets: ex.sets,
-                reps: ex.reps,
-                rest_seconds: ex.rest_seconds,
-                order_index: nextOrder,
+              pdeData.push({
+                plan_day_id: day.id, exercise_id: exerciseId,
+                sets: ex.sets, reps: ex.reps, rest_seconds: ex.rest_seconds,
+                order_index: idx,
               })
             }
-          }
+          })
+        })
+
+        if (pdeData.length > 0) {
+          await supabase.from('plan_day_exercises').insert(pdeData)
         }
       }
     }
@@ -254,10 +252,9 @@ export function usePlansV2() {
     return { data: plan, error: null }
   }, [user])
 
-  // ── CLONAR PLAN PÚBLICO ──────────────────────
   const clonePlan = useCallback(async (planId) => {
     const { data: original } = await supabase.from('plans')
-      .select('*').eq('id', planId).single()
+      .select('*').eq('id', planId).maybeSingle()
     if (!original) return { data: null, error: 'Plan no encontrado' }
 
     const { data: clone, error } = await supabase.from('plans').insert({
@@ -266,7 +263,7 @@ export function usePlansV2() {
       description: original.description,
       total_days: original.total_days,
       is_public: false,
-    }).select().single()
+    }).select().maybeSingle()
 
     if (error || !clone) return { data: null, error }
 
@@ -274,58 +271,72 @@ export function usePlansV2() {
       .select(`*, exercises:plan_day_exercises(*, exercise:exercises(*))`)
       .eq('plan_id', planId).order('day_number')
 
-    if (originalDays) {
-      for (const day of originalDays) {
-        const { data: newDay } = await supabase.from('plan_days').insert({
-          plan_id: clone.id,
-          day_number: day.day_number,
-          type: day.type,
-          name: day.name,
-        }).select('id').single()
+    if (!originalDays) return { data: clone, error: null }
 
-        if (newDay && day.exercises) {
-          for (const pde of day.exercises) {
-            let exerciseId = pde.exercise_id
+    const daysData = originalDays.map(d => ({
+      plan_id: clone.id, day_number: d.day_number, type: d.type, name: d.name,
+    }))
+    const { data: newDays } = await supabase.from('plan_days').insert(daysData).select('*')
 
-            if (pde.exercise?.user_id !== user.id) {
-              const { data: existing } = await supabase.from('exercises')
-                .select('id').eq('name', pde.exercise?.name).limit(1)
-              if (existing && existing.length > 0) {
-                exerciseId = existing[0].id
-              } else if (pde.exercise) {
-                const { data: newEx } = await supabase.from('exercises').insert({
-                  user_id: user.id,
-                  name: pde.exercise.name,
-                  description: pde.exercise.description,
-                  youtube_url: pde.exercise.youtube_url,
-                  muscle_group: pde.exercise.muscle_group,
-                  equipment: pde.exercise.equipment,
-                  difficulty: pde.exercise.difficulty,
-                  is_public: false,
-                }).select('id').single()
-                exerciseId = newEx?.id
-              }
-            }
+    if (!newDays) return { data: clone, error: null }
 
-            if (exerciseId) {
-              const { data: existingPde } = await supabase.from('plan_day_exercises')
-                .select('order_index').eq('plan_day_id', newDay.id).order('order_index', { ascending: false }).limit(1)
-              const nextOrder = existingPde?.length ? (existingPde[0].order_index + 1) : 0
+    const dayById = {}
+    newDays.forEach(d => { dayById[d.day_number] = d })
 
-              await supabase.from('plan_day_exercises').insert({
-                plan_day_id: newDay.id,
-                exercise_id: exerciseId,
-                sets: pde.sets,
-                reps: pde.reps,
-                rest_seconds: pde.rest_seconds,
-                order_index: nextOrder,
-                note: pde.note,
-                superset_group: pde.superset_group,
-              })
-            }
-          }
+    const exerciseNames = new Set()
+    originalDays.forEach(d => {
+      d.exercises?.forEach(pde => {
+        if (pde.exercise?.user_id !== user.id) exerciseNames.add(pde.exercise?.name)
+      })
+    })
+
+    const { data: existingExercises } = await supabase.from('exercises')
+      .select('name, id').in('name', [...exerciseNames])
+
+    const exerciseMap = {}
+    if (existingExercises) existingExercises.forEach(e => { exerciseMap[e.name] = e.id })
+
+    const toCreate = []
+    originalDays.forEach(d => {
+      d.exercises?.forEach(pde => {
+        if (pde.exercise && pde.exercise.user_id !== user.id && !exerciseMap[pde.exercise.name]) {
+          toCreate.push({
+            user_id: user.id, name: pde.exercise.name,
+            description: pde.exercise.description, youtube_url: pde.exercise.youtube_url,
+            muscle_group: pde.exercise.muscle_group, equipment: pde.exercise.equipment,
+            difficulty: pde.exercise.difficulty, is_public: false,
+          })
+          exerciseMap[pde.exercise.name] = null
         }
-      }
+      })
+    })
+
+    if (toCreate.length > 0) {
+      const { data: newExercises } = await supabase.from('exercises').insert(toCreate).select('*')
+      if (newExercises) newExercises.forEach(e => { exerciseMap[e.name] = e.id })
+    }
+
+    const allPdes = []
+    originalDays.forEach(d => {
+      const newDay = dayById[d.day_number]
+      if (!newDay) return
+      d.exercises?.forEach((pde, idx) => {
+        let exerciseId = pde.exercise_id
+        if (pde.exercise?.user_id !== user.id) {
+          exerciseId = exerciseMap[pde.exercise?.name] || pde.exercise_id
+        }
+        if (exerciseId) {
+          allPdes.push({
+            plan_day_id: newDay.id, exercise_id: exerciseId,
+            sets: pde.sets, reps: pde.reps, rest_seconds: pde.rest_seconds,
+            order_index: idx, note: pde.note, superset_group: pde.superset_group,
+          })
+        }
+      })
+    })
+
+    if (allPdes.length > 0) {
+      await supabase.from('plan_day_exercises').insert(allPdes)
     }
 
     return { data: clone, error: null }

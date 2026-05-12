@@ -25,11 +25,6 @@ export default function HomePage({ activePlan, onNavigate, darkMode, onToggleDar
   const calDays = Array.from({ length: calEnd - calStart + 1 }, (_, i) => calStart + i)
   const [selectedDay, setSelectedDay] = useState(null)
 
-  // Cargar ejercicios del día actual desde el plan
-  useEffect(() => {
-    if (planId) loadTodayExercises()
-  }, [planId, curDay])
-
   useEffect(() => {
     if (planId) loadDayExercises(selectedDay || curDay)
   }, [planId, curDay, selectedDay])
@@ -40,14 +35,7 @@ export default function HomePage({ activePlan, onNavigate, darkMode, onToggleDar
     const day = days.find(d => d.day_number === dayNum)
     setTodayDayData(day || null)
     setLoadingDay(false)
-  }
-
-  const loadTodayExercises = async () => {
-    setLoadingDay(true)
-    const days = await getPlanDays(planId)
-    const today = days.find(d => d.day_number === curDay)
-    setTodayDayData(today || null)
-    setLoadingDay(false)
+    return days
   }
 
   // Convertir ejercicios del plan al formato del player

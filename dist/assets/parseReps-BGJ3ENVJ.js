@@ -1,0 +1,1 @@
+function r(t){if(!t)return{type:"reps",val:12};const e=t.trim().toLowerCase();return e.endsWith("min")?{type:"time",val:parseInt(e)*60}:e.endsWith("s")?{type:"time",val:parseInt(e)}:{type:"reps",val:parseInt(e)||12}}export{r as p};

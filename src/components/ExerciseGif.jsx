@@ -1,11 +1,19 @@
 import { useState, useEffect } from 'react'
 
+const gifCache = new Map()
+
 export default function ExerciseGif({ exerciseName, size = 'small' }) {
-  const [gifData, setGifData] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [gifData, setGifData] = useState(() => gifCache.get(exerciseName) || null)
+  const [loading, setLoading] = useState(() => !gifCache.has(exerciseName) && !!exerciseName)
 
   useEffect(() => {
     if (!exerciseName) return
+    if (gifCache.has(exerciseName)) {
+      setGifData(gifCache.get(exerciseName))
+      setLoading(false)
+      return
+    }
+
     let cancelled = false
 
     const fetchGif = async () => {
@@ -19,7 +27,10 @@ export default function ExerciseGif({ exerciseName, size = 'small' }) {
 
         if (!res.ok) return
         const data = await res.json()
-        if (!cancelled) setGifData(data)
+        if (!cancelled) {
+          gifCache.set(exerciseName, data)
+          setGifData(data)
+        }
       } catch {
         // Silently fail - GIF is optional
       } finally {
