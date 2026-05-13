@@ -9,6 +9,8 @@ export function useExercises() {
   const { user } = useAuth()
   const [myExercises, setMyExercises] = useState([])
   const [publicExercises, setPublicExercises] = useState([])
+  const [totalMyCount, setTotalMyCount] = useState(0)
+  const [totalPublicCount, setTotalPublicCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(true)
   const pageRef = useRef(0)
@@ -33,6 +35,7 @@ export function useExercises() {
         .range(offset, offset + PAGE_SIZE - 1),
       supabase.from('exercises').select('*')
         .eq('is_public', true)
+        .neq('user_id', user.id)
         .order('likes_count', { ascending: false })
         .range(offset, offset + PAGE_SIZE - 1),
     ])
@@ -40,12 +43,21 @@ export function useExercises() {
     const myData = myResult.data || []
     const pubData = pubResult.data || []
 
+    if (!append) {
+      const [{ count: c1 }, { count: c2 }] = await Promise.all([
+        supabase.from('exercises').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('exercises').select('*', { count: 'exact', head: true }).eq('is_public', true).neq('user_id', user.id),
+      ])
+      setTotalMyCount(c1 || 0)
+      setTotalPublicCount(c2 || 0)
+    }
+
     if (append) {
       setMyExercises(prev => [...prev, ...myData])
-      setPublicExercises(prev => [...prev, ...pubData.filter(p => p.user_id !== user.id)])
+      setPublicExercises(prev => [...prev, ...pubData])
     } else {
       setMyExercises(myData)
-      setPublicExercises(pubData.filter(p => p.user_id !== user.id))
+      setPublicExercises(pubData)
     }
 
     setHasMore(myData.length >= PAGE_SIZE || pubData.length >= PAGE_SIZE)
@@ -93,28 +105,47 @@ export function useExercises() {
     if (data) {
       cache.clear()
       setMyExercises(prev => [data, ...prev])
-      if (data.is_public) setPublicExercises(prev => [data, ...prev])
+      setTotalMyCount(c => c + 1)
+      if (data.is_public) {
+        setPublicExercises(prev => [data, ...prev])
+        setTotalPublicCount(c => c + 1)
+      }
     }
     return { data, error }
   }, [user])
 
   const updateExercise = useCallback(async (id, updates) => {
+    const prevData = myExercises.find(e => e.id === id)
     const { data, error } = await supabase.from('exercises')
       .update(updates).eq('id', id).select().maybeSingle()
     if (data) {
       cache.clear()
       setMyExercises(prev => prev.map(e => e.id === id ? data : e))
-      setPublicExercises(prev => prev.map(e => e.id === id ? data : e))
+      if (data.is_public) {
+        setPublicExercises(prev => {
+          const exists = prev.find(e => e.id === id)
+          return exists ? prev.map(e => e.id === id ? data : e) : [data, ...prev]
+        })
+        if (!prevData?.is_public) setTotalPublicCount(c => c + 1)
+      } else {
+        setPublicExercises(prev => prev.filter(e => e.id !== id))
+        if (prevData?.is_public) setTotalPublicCount(c => Math.max(0, c - 1))
+      }
     }
     return { data, error }
-  }, [])
+  }, [myExercises])
 
   const deleteExercise = useCallback(async (id) => {
+    const target = myExercises.find(e => e.id === id)
     await supabase.from('exercises').delete().eq('id', id)
     cache.clear()
     setMyExercises(prev => prev.filter(e => e.id !== id))
     setPublicExercises(prev => prev.filter(e => e.id !== id))
-  }, [])
+    if (target) {
+      setTotalMyCount(c => Math.max(0, c - 1))
+      if (target.is_public) setTotalPublicCount(c => Math.max(0, c - 1))
+    }
+  }, [myExercises])
 
   const toggleLike = useCallback(async (exerciseId) => {
     const { data } = await supabase.rpc('toggle_exercise_like', { p_exercise_id: exerciseId })
@@ -129,5 +160,5 @@ export function useExercises() {
     return (data || []).map(l => l.exercise_id)
   }, [user])
 
-  return { myExercises, publicExercises, loading, hasMore, loadMore, loadExercises, searchExercises, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes }
+  return { myExercises, publicExercises, totalMyCount, totalPublicCount, loading, hasMore, loadMore, loadExercises, searchExercises, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes }
 }

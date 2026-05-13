@@ -4,6 +4,7 @@ import TemplatePicker from '../components/TemplatePicker'
 import { useDebounce } from '../hooks/useYouTubeSearch'
 import { SkeletonCard } from '../components/Skeleton'
 import { useToast } from '../context/ToastContext'
+import { validatePlanJSON, countImportStats } from '../lib/importPlan'
 
 function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onClone, cloning, onLike, onDelete }) {
   return (
@@ -43,7 +44,7 @@ function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onC
 }
 
 export default function PlansPageV2({ onNavigate }) {
-  const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan } = usePlansV2()
+  const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan, importPlanFromJSON } = usePlansV2()
   const toast = useToast()
   const [tab, setTab] = useState('mine')
   const [view, setView] = useState('list')
@@ -55,6 +56,14 @@ export default function PlansPageV2({ onNavigate }) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 400)
   const abortRef = useRef(null)
+
+  const [showImport, setShowImport] = useState(false)
+  const [importJson, setImportJson] = useState(null)
+  const [importPreview, setImportPreview] = useState(null)
+  const [importError, setImportError] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState(null)
+  const fileInputRef = useRef(null)
 
   const loadPublic = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort()
@@ -104,6 +113,55 @@ export default function PlansPageV2({ onNavigate }) {
       return
     }
     toast.success(`Plan "${planName}" copiado con éxito`)
+    onNavigate('plan-builder', { planId: data.id })
+  }
+
+  const handleImportFile = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setImportError(null)
+    setImportPreview(null)
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const json = JSON.parse(ev.target.result)
+        const validation = validatePlanJSON(json)
+        if (!validation.valid) {
+          setImportError(validation.errors.join('\n'))
+          setImportJson(null)
+          return
+        }
+        setImportJson(json)
+        setImportPreview(countImportStats(json))
+      } catch (err) {
+        setImportError('Archivo JSON inválido: ' + err.message)
+        setImportJson(null)
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  const handleImport = async () => {
+    if (!importJson) return
+    setImporting(true)
+    setImportError(null)
+    setImportProgress(null)
+
+    const { data, error } = await importPlanFromJSON(importJson, (progress) => {
+      setImportProgress(progress)
+    })
+
+    setImporting(false)
+    if (error) {
+      setImportError(error)
+      return
+    }
+
+    toast.success(`Plan "${data.name}" importado con éxito`)
+    setShowImport(false)
+    setImportJson(null)
+    setImportPreview(null)
     onNavigate('plan-builder', { planId: data.id })
   }
 
@@ -157,6 +215,7 @@ export default function PlansPageV2({ onNavigate }) {
         <button className="btn-ghost" onClick={() => onNavigate('home')}>‹</button>
         <div><div className="hdr-title">Planes</div><div className="hdr-sub">{myPlans.length} propios</div></div>
         <div className="hdr-right">
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}>📥 Importar</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setView('template')}>📋 Plantilla</button>
           <button className="btn btn-primary btn-sm" onClick={() => setView('create')}>+ Nuevo</button>
         </div>
@@ -212,6 +271,91 @@ export default function PlansPageV2({ onNavigate }) {
           </>
         )}
       </div>
+
+      {showImport && (
+        <div onClick={() => { if (!importing) setShowImport(false) }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 'var(--r) var(--r) 0 0', padding: 20, width: '100%', maxWidth: 430 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>📥 Importar plan desde JSON</div>
+              <button onClick={() => { if (!importing) setShowImport(false) }} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+
+            {!importPreview && !importError && (
+              <div>
+                <div style={{ fontSize: 13, color: 'var(--t2)', marginBottom: 12 }}>
+                  Selecciona un archivo <code>.json</code> con el formato de rutina
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportFile}
+                  style={{ display: 'none' }}
+                />
+                <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()} style={{ width: '100%', marginBottom: 8 }}>
+                  📁 Seleccionar archivo
+                </button>
+              </div>
+            )}
+
+            {importError && (
+              <div>
+                <div style={{ background: 'var(--pr-l)', borderRadius: 'var(--rm)', padding: 12, marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--pr-d)', marginBottom: 4 }}>Error</div>
+                  <pre style={{ fontSize: 12, color: 'var(--pr-d)', whiteSpace: 'pre-wrap', margin: 0 }}>{importError}</pre>
+                </div>
+                <button className="btn btn-secondary" onClick={() => { setImportError(null); setImportPreview(null); setImportJson(null) }} style={{ width: '100%' }}>
+                  Intentar con otro archivo
+                </button>
+              </div>
+            )}
+
+            {importPreview && !importError && (
+              <div>
+                <div style={{ background: 'var(--surface2)', borderRadius: 'var(--r)', padding: 14, marginBottom: 14 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t1)', marginBottom: 10 }}>{importPreview.name}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 13 }}>
+                    <Stat label="Días totales" value={importPreview.totalDays} />
+                    <Stat label="Ejercicios únicos" value={importPreview.uniqueExercises} />
+                    <Stat label="Días con rutina" value={importPreview.trainingDays} />
+                    <Stat label="Bloques de ejercicio" value={importPreview.totalSegments} />
+                    <Stat label="Días de descanso" value={importPreview.restDays} />
+                    <Stat label="Ejerc. totales" value={importPreview.totalExercises} />
+                    {importPreview.emptyDays > 0 && <Stat label="Días pendientes" value={importPreview.emptyDays} />}
+                  </div>
+                </div>
+
+                {importProgress && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, color: 'var(--t2)', marginBottom: 6 }}>{importProgress.message}</div>
+                    {importProgress.total && (
+                      <div style={{ height: 4, background: 'var(--bd)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${(importProgress.current / importProgress.total) * 100}%`, background: 'var(--pr)', borderRadius: 2, transition: 'width .3s' }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button className="btn btn-primary" onClick={handleImport} disabled={importing} style={{ width: '100%' }}>
+                  {importing ? 'Importando...' : `Importar plan · ${importPreview.trainingDays + importPreview.restDays + importPreview.emptyDays} días`}
+                </button>
+                <button className="btn btn-secondary" onClick={() => { setImportJson(null); setImportPreview(null); setImportError(null) }} disabled={importing} style={{ width: '100%', marginTop: 8 }}>
+                  Cancelar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value }) {
+  return (
+    <div>
+      <span style={{ color: 'var(--t2)' }}>{label}: </span>
+      <span style={{ fontWeight: 500, color: 'var(--t1)' }}>{value}</span>
     </div>
   )
 }

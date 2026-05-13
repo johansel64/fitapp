@@ -154,7 +154,7 @@ const ExerciseCard = memo(({ ex, onLike, liked, onEdit, onDelete, showActions = 
 })
 
 export default function ExercisesPage({ onNavigate }) {
-  const { myExercises, publicExercises, loading, hasMore, loadMore, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
+  const { myExercises, publicExercises, totalMyCount, totalPublicCount, loading, hasMore, loadMore, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
   const [tab, setTab] = useState('explore')
   const [view, setView] = useState('list')
   const [editing, setEditing] = useState(null)
@@ -236,7 +236,7 @@ export default function ExercisesPage({ onNavigate }) {
     <div>
       <div className="hdr">
         <button className="btn-ghost" onClick={() => onNavigate('home')}>‹</button>
-        <div><div className="hdr-title">Ejercicios</div><div className="hdr-sub">{publicExercises.length} públicos</div></div>
+        <div><div className="hdr-title">Ejercicios</div><div className="hdr-sub">{tab === 'mine' ? `${totalMyCount} propios` : `${totalPublicCount} públicos`}</div></div>
         <div className="hdr-right">
           <button className="btn btn-primary btn-sm" onClick={() => setView('create')}>+ Nuevo</button>
         </div>

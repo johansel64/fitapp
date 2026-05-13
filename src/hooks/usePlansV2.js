@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from './useAuth'
 import { getDayType, getDayName, WARMUP_EXERCISES } from '../data/templates'
+import { validatePlanJSON, extractUniqueExercises, normalizeExName, buildDayExercises } from '../lib/importPlan'
 
 export function usePlansV2() {
   const { user } = useAuth()
@@ -342,6 +343,99 @@ export function usePlansV2() {
     return { data: clone, error: null }
   }, [user])
 
+  const importPlanFromJSON = useCallback(async (jsonData, onProgress) => {
+    const validation = validatePlanJSON(jsonData)
+    if (!validation.valid) {
+      return { data: null, error: validation.errors.join('. ') }
+    }
+
+    const planName = jsonData.program?.name || 'Plan importado'
+    const totalDays = jsonData.program?.totalDays || jsonData.days.length
+
+    if (onProgress) onProgress({ step: 'plan', message: 'Creando plan...' })
+    const { data: plan, error: planError } = await supabase.from('plans').insert({
+      user_id: user.id,
+      name: planName,
+      description: `Importado desde JSON · ${jsonData.days.length} días`,
+      total_days: totalDays,
+      is_public: false,
+    }).select().maybeSingle()
+
+    if (planError || !plan) {
+      return { data: null, error: planError?.message || 'Error al crear el plan' }
+    }
+
+    if (onProgress) onProgress({ step: 'days', message: 'Creando días...' })
+    const daysData = jsonData.days.map(d => ({
+      plan_id: plan.id,
+      day_number: d.calendarDay,
+      type: d.type === 'optional' ? 'training' : (d.type || 'training'),
+      name: d.label || `Día ${d.calendarDay}`,
+    }))
+
+    const { data: createdDays, error: daysError } = await supabase
+      .from('plan_days').insert(daysData).select('*')
+
+    if (daysError) return { data: null, error: daysError.message }
+
+    const uniqueExercises = extractUniqueExercises(jsonData.days)
+    const exerciseMap = {}
+
+    if (onProgress) onProgress({ step: 'exercises', message: `Procesando ${uniqueExercises.length} ejercicios...`, current: 0, total: uniqueExercises.length })
+
+    const allNames = uniqueExercises.map(e => e.name)
+    const { data: existing } = await supabase.from('exercises')
+      .select('id, name').in('name', allNames)
+      .or(`is_public.eq.true,user_id.eq.${user.id}`)
+
+    const existingByName = {}
+    if (existing) existing.forEach(e => { existingByName[e.name.toLowerCase().trim()] = e.id })
+
+    const toCreate = []
+    uniqueExercises.forEach(ex => {
+      const key = normalizeExName(ex.name)
+      if (existingByName[key]) {
+        exerciseMap[key] = existingByName[key]
+      } else {
+        toCreate.push({
+          user_id: user.id,
+          name: ex.name,
+          youtube_url: ex.youtube_url || null,
+          is_public: true,
+        })
+      }
+    })
+
+    if (toCreate.length > 0) {
+      const { data: created } = await supabase.from('exercises').insert(toCreate).select('id, name')
+      if (created) {
+        created.forEach(e => {
+          exerciseMap[e.name.toLowerCase().trim()] = e.id
+        })
+      }
+    }
+
+    if (onProgress) onProgress({ step: 'pdes', message: 'Vinculando ejercicios a días...' })
+
+    const pdes = buildDayExercises(jsonData.days, createdDays, exerciseMap)
+
+    if (pdes.length > 0) {
+      const batchSize = 100
+      const totalBatches = Math.ceil(pdes.length / batchSize)
+      for (let i = 0; i < pdes.length; i += batchSize) {
+        const batch = pdes.slice(i, i + batchSize)
+        const batchNum = Math.floor(i / batchSize) + 1
+        if (onProgress) onProgress({ step: 'pdes', message: `Guardando ejercicios... (${batchNum}/${totalBatches})`, current: batchNum, total: totalBatches })
+        const { error: pdeError } = await supabase.from('plan_day_exercises').insert(batch)
+        if (pdeError) return { data: null, error: pdeError.message }
+      }
+    }
+
+    setMyPlans(prev => [plan, ...prev])
+
+    return { data: plan, error: null }
+  }, [user])
+
   return {
     myPlans, activePlan, loading,
     loadPlans, getPublicPlans, createPlan, updatePlan, deletePlan, setActivePlan,
@@ -349,6 +443,7 @@ export function usePlansV2() {
     addExerciseToDay, updateExerciseInDay, removeExerciseFromDay,
     createSupersetGroup, addExerciseToSuperset, deleteSupersetGroup,
     toggleLike, getUserLikes,
-    createPlanFromTemplate, clonePlan
+    createPlanFromTemplate, clonePlan,
+    importPlanFromJSON
   }
 }
