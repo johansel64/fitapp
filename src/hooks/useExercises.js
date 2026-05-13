@@ -4,6 +4,7 @@ import { useAuth } from './useAuth'
 
 const cache = new Map()
 const CACHE_TTL = 30_000
+const PAGE_SIZE = 20
 
 export function useExercises() {
   const { user } = useAuth()
@@ -12,38 +13,54 @@ export function useExercises() {
   const [totalMyCount, setTotalMyCount] = useState(0)
   const [totalPublicCount, setTotalPublicCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [hasMore, setHasMore] = useState(true)
-  const pageRef = useRef(0)
-  const PAGE_SIZE = 30
+  const [hasMoreMy, setHasMoreMy] = useState(true)
+  const [hasMorePub, setHasMorePub] = useState(true)
+  const pageMyRef = useRef(0)
+  const pagePubRef = useRef(0)
 
   useEffect(() => {
     if (user) loadExercises()
   }, [user])
 
-  const loadExercises = async (append = false) => {
-    if (!append) {
+  const loadExercises = async (appendMy = false, appendPub = false) => {
+    if (!appendMy && !appendPub) {
       setLoading(true)
-      pageRef.current = 0
+      pageMyRef.current = 0
+      pagePubRef.current = 0
     }
 
-    const offset = pageRef.current * PAGE_SIZE
+    const offsetMy = pageMyRef.current * PAGE_SIZE
+    const offsetPub = pagePubRef.current * PAGE_SIZE
 
-    const [myResult, pubResult] = await Promise.all([
-      supabase.from('exercises').select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + PAGE_SIZE - 1),
-      supabase.from('exercises').select('*')
-        .eq('is_public', true)
-        .neq('user_id', user.id)
-        .order('likes_count', { ascending: false })
-        .range(offset, offset + PAGE_SIZE - 1),
-    ])
+    const promises = []
+    if (!appendMy) {
+      promises.push(
+        supabase.from('exercises').select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .range(offsetMy, offsetMy + PAGE_SIZE - 1)
+      )
+    } else {
+      promises.push(Promise.resolve(null))
+    }
 
-    const myData = myResult.data || []
-    const pubData = pubResult.data || []
+    if (!appendPub) {
+      promises.push(
+        supabase.from('exercises').select('*')
+          .eq('is_public', true)
+          .neq('user_id', user.id)
+          .order('likes_count', { ascending: false })
+          .range(offsetPub, offsetPub + PAGE_SIZE - 1)
+      )
+    } else {
+      promises.push(Promise.resolve(null))
+    }
 
-    if (!append) {
+    const [myResult, pubResult] = await Promise.all(promises)
+    const myData = myResult?.data || []
+    const pubData = pubResult?.data || []
+
+    if (!appendMy && !appendPub) {
       const [{ count: c1 }, { count: c2 }] = await Promise.all([
         supabase.from('exercises').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
         supabase.from('exercises').select('*', { count: 'exact', head: true }).eq('is_public', true).neq('user_id', user.id),
@@ -52,25 +69,44 @@ export function useExercises() {
       setTotalPublicCount(c2 || 0)
     }
 
-    if (append) {
-      setMyExercises(prev => [...prev, ...myData])
-      setPublicExercises(prev => [...prev, ...pubData])
-    } else {
+    if (!appendMy && !appendPub) {
       setMyExercises(myData)
       setPublicExercises(pubData)
     }
+    if (appendMy) setMyExercises(prev => [...prev, ...myData])
+    if (appendPub) setPublicExercises(prev => [...prev, ...pubData])
 
-    setHasMore(myData.length >= PAGE_SIZE || pubData.length >= PAGE_SIZE)
+    if (!appendMy || myData.length > 0) {
+      setHasMoreMy(myData.length >= PAGE_SIZE)
+    }
+    if (!appendPub || pubData.length > 0) {
+      setHasMorePub(pubData.length >= PAGE_SIZE)
+    }
     setLoading(false)
   }
 
-  const loadMore = useCallback(() => {
-    pageRef.current += 1
-    loadExercises(true)
+  const loadMoreMy = useCallback(() => {
+    pageMyRef.current += 1
+    loadExercises(true, false)
   }, [user])
 
-  const searchExercises = async (query = '', filters = {}) => {
-    const cacheKey = JSON.stringify({ query, filters, uid: user.id })
+  const loadMorePub = useCallback(() => {
+    pagePubRef.current += 1
+    loadExercises(false, true)
+  }, [user])
+
+  const loadPageMy = useCallback((page) => {
+    pageMyRef.current = page
+    loadExercises(false, false)
+  }, [user])
+
+  const loadPagePub = useCallback((page) => {
+    pagePubRef.current = page
+    loadExercises(false, false)
+  }, [user])
+
+  const searchExercises = async (query = '', filters = {}, page = 0) => {
+    const cacheKey = JSON.stringify({ query, filters, uid: user.id, page })
     const cached = cache.get(cacheKey)
     if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data
 
@@ -83,9 +119,10 @@ export function useExercises() {
     if (filters.equipment) q = q.eq('equipment', filters.equipment)
     if (filters.myOnly) q = q.eq('user_id', user.id)
 
-    q = q.order('likes_count', { ascending: false }).limit(50)
+    const offset = page * PAGE_SIZE
+    q = q.order('likes_count', { ascending: false }).range(offset, offset + PAGE_SIZE - 1)
     const { data } = await q
-    const result = data || []
+    const result = { data: data || [], hasMore: (data || []).length >= PAGE_SIZE }
     cache.set(cacheKey, { data: result, ts: Date.now() })
     return result
   }
@@ -160,5 +197,13 @@ export function useExercises() {
     return (data || []).map(l => l.exercise_id)
   }, [user])
 
-  return { myExercises, publicExercises, totalMyCount, totalPublicCount, loading, hasMore, loadMore, loadExercises, searchExercises, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes }
+  return {
+    myExercises, publicExercises,
+    totalMyCount, totalPublicCount,
+    loading, hasMoreMy, hasMorePub,
+    loadMoreMy, loadMorePub, loadPageMy, loadPagePub,
+    searchExercises, createExercise, updateExercise, deleteExercise,
+    toggleLike, getUserLikes,
+    PAGE_SIZE,
+  }
 }

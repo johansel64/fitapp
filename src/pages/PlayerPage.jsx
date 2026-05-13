@@ -270,7 +270,7 @@ export default function PlayerPage({ exercises = [], startIndex = 0, planId, day
 
   // ── PANTALLA DE EJERCICIO ─────────────────────────────────────
   return (
-    <div style={{ paddingBottom: 24 }}>
+    <div>
       <div className="hdr">
         <button className="btn-ghost" onClick={() => { clearTimer(); onBack() }}>‹</button>
         <div>

@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useProgress } from '../hooks/useProgress'
-import { usePlansV2 } from '../hooks/usePlansV2'
+import { usePlans } from '../context/PlansContext'
 import { parseReps } from '../lib/parseReps'
 
 const MUSCLE_ICONS = { chest: '💪', back: '🏋️', legs: '🦵', glutes: '🍑', shoulders: '🔝', arms: '💪', core: '🔥', cardio: '🏃', full_body: '⚡', default: '💪' }
 
 export default function HomePage({ activePlan, onNavigate, darkMode, onToggleDark }) {
   const { user } = useAuth()
-  const { getPlanDays } = usePlansV2()
+  const { getPlanDays } = usePlans()
   const planId = activePlan?.id
   const totalDays = activePlan?.total_days || 30
   const { completedDays, isDayDone, loading } = useProgress(planId)
@@ -103,7 +103,7 @@ export default function HomePage({ activePlan, onNavigate, darkMode, onToggleDar
   const hasExercises = todayExercises.length > 0
 
   return (
-    <div style={{ paddingBottom: 80 }}>
+    <div>
       {/* Header */}
       <div className="hdr">
         <div className="hdr-logo">F</div>

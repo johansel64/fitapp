@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { usePlansV2 } from '../hooks/usePlansV2'
+import { usePlans } from '../context/PlansContext'
 import { useExercises } from '../hooks/useExercises'
 
 const MUSCLE_ES = { chest: 'Pecho', back: 'Espalda', legs: 'Piernas', shoulders: 'Hombros', arms: 'Brazos', core: 'Core', cardio: 'Cardio', full_body: 'Cuerpo completo' }
@@ -202,7 +202,7 @@ const getGroupedExercises = (exercises) => {
 }
 
 export default function PlanBuilderPage({ planId, onNavigate }) {
-  const { getPlanDays, upsertDay, deleteDay, addExerciseToDay, updateExerciseInDay, removeExerciseFromDay, addExerciseToSuperset, deleteSupersetGroup, myPlans } = usePlansV2()
+  const { getPlanDays, upsertDay, deleteDay, addExerciseToDay, updateExerciseInDay, removeExerciseFromDay, addExerciseToSuperset, deleteSupersetGroup, myPlans } = usePlans()
   const plan = myPlans.find(p => p.id === planId)
   const [days, setDays] = useState([])
   const [loading, setLoading] = useState(true)

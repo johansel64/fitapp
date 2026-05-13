@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { usePlansV2 } from '../hooks/usePlansV2'
+import { usePlans } from '../context/PlansContext'
 import TemplatePicker from '../components/TemplatePicker'
 import { useDebounce } from '../hooks/useYouTubeSearch'
 import { SkeletonCard } from '../components/Skeleton'
 import { useToast } from '../context/ToastContext'
 import { validatePlanJSON, countImportStats } from '../lib/importPlan'
+import { buildExportJSON, downloadJSON } from '../lib/exportPlan'
+import { useAuth } from '../hooks/useAuth'
 
-function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onClone, cloning, onLike, onDelete }) {
+function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEditPlan, onEditDays, onExport, onClone, cloning, onLike, onDelete }) {
   return (
     <div style={{ background: 'var(--surface)', border: activePlanId === plan.id ? '2px solid var(--pr)' : '0.5px solid var(--bd)', borderRadius: 'var(--r)', padding: 16, marginBottom: 10 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
@@ -25,7 +27,11 @@ function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onC
           <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onActivate}>Activar</button>
         )}
         {isOwn && (
-          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onEdit}>Editar días</button>
+          <>
+            <button className="btn btn-secondary btn-sm" onClick={onEditPlan} style={{ flex: 1 }}>✏️ Editar</button>
+            <button className="btn btn-secondary btn-sm" onClick={onEditDays} style={{ flex: 1 }}>📅 Días</button>
+            <button className="btn btn-secondary btn-sm" onClick={onExport} style={{ flex: 1 }}>📤 Exportar</button>
+          </>
         )}
         {!isOwn && (
           <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onClone} disabled={cloning}>
@@ -44,7 +50,8 @@ function PlanCard({ plan, isOwn, activePlanId, likedIds, onActivate, onEdit, onC
 }
 
 export default function PlansPageV2({ onNavigate }) {
-  const { myPlans, activePlan, loading, createPlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan, importPlanFromJSON } = usePlansV2()
+  const { myPlans, activePlan, loading, createPlan, updatePlan, deletePlan, setActivePlan, getPublicPlans, toggleLike, getUserLikes, clonePlan, importPlanFromJSON } = usePlans()
+  const { user } = useAuth()
   const toast = useToast()
   const [tab, setTab] = useState('mine')
   const [view, setView] = useState('list')
@@ -64,6 +71,9 @@ export default function PlansPageV2({ onNavigate }) {
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState(null)
   const fileInputRef = useRef(null)
+
+  const [editingPlan, setEditingPlan] = useState(null)
+  const [editForm, setEditForm] = useState({ name: '', description: '', is_public: false })
 
   const loadPublic = useCallback(async () => {
     if (abortRef.current) abortRef.current.abort()
@@ -91,6 +101,32 @@ export default function PlansPageV2({ onNavigate }) {
       onNavigate('plan-builder', { planId: data.id })
     }
     setSaving(false)
+  }
+
+  const handleEditPlan = (plan) => {
+    setEditingPlan(plan)
+    setEditForm({ name: plan.name, description: plan.description || '', is_public: plan.is_public || false })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editForm.name.trim()) return
+    const updated = await updatePlan(editingPlan.id, editForm)
+    if (updated) {
+      toast.success('Plan actualizado')
+      setEditingPlan(null)
+    }
+  }
+
+  const handleExport = async (plan) => {
+    toast.info('Exportando plan...')
+    try {
+      const json = await buildExportJSON(plan.id, user.id)
+      if (!json) { toast.error('Error al exportar'); return }
+      downloadJSON(json, plan.name)
+      toast.success('Plan exportado como JSON')
+    } catch (e) {
+      toast.error('Error al exportar: ' + e.message)
+    }
   }
 
   const handleTemplateCreated = (planId) => {
@@ -232,7 +268,7 @@ export default function PlansPageV2({ onNavigate }) {
         </div>
       )}
 
-      <div className="sec" style={{ paddingBottom: 80 }}>
+      <div className="sec">
         {loading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
 
         {tab === 'mine' && (
@@ -250,7 +286,9 @@ export default function PlansPageV2({ onNavigate }) {
             {myPlans.map(plan => (
               <PlanCard key={plan.id} plan={plan} isOwn activePlanId={activePlan?.id} likedIds={likedIds}
                 onActivate={async () => { await setActivePlan(plan.id); onNavigate('home') }}
-                onEdit={() => onNavigate('plan-builder', { planId: plan.id })}
+                onEditPlan={() => handleEditPlan(plan)}
+                onEditDays={() => onNavigate('plan-builder', { planId: plan.id })}
+                onExport={() => handleExport(plan)}
                 onLike={null}
                 onDelete={() => { if (confirm('¿Eliminar plan?')) deletePlan(plan.id) }}
               />
@@ -344,6 +382,38 @@ export default function PlansPageV2({ onNavigate }) {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {editingPlan && (
+        <div onClick={() => setEditingPlan(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 300, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--surface)', borderRadius: 'var(--r) var(--r) 0 0', padding: 20, width: '100%', maxWidth: 430 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--t1)' }}>✏️ Editar plan</div>
+              <button onClick={() => setEditingPlan(null)} style={{ background: 'none', border: 'none', color: 'var(--t2)', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Nombre del plan</label>
+              <input className="input" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} placeholder="Nombre del plan" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Descripción</label>
+              <textarea className="input" style={{ minHeight: 60, resize: 'none' }} value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="Descripción del plan..." />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0', borderTop: '0.5px solid var(--bd)', marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t1)' }}>Plan público</div>
+                <div style={{ fontSize: 12, color: 'var(--t2)' }}>Otros usuarios pueden usarlo</div>
+              </div>
+              <div onClick={() => setEditForm(f => ({ ...f, is_public: !f.is_public }))} style={{ width: 44, height: 26, borderRadius: 13, background: editForm.is_public ? 'var(--pr)' : 'var(--bd)', cursor: 'pointer', position: 'relative', transition: 'background .2s' }}>
+                <div style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: editForm.is_public ? 21 : 3, transition: 'left .2s' }} />
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={handleSaveEdit} disabled={!editForm.name.trim()} style={{ width: '100%' }}>
+              Guardar cambios
+            </button>
+            <button className="btn btn-secondary" onClick={() => setEditingPlan(null)} style={{ width: '100%', marginTop: 8 }}>Cancelar</button>
           </div>
         </div>
       )}

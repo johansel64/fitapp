@@ -1,6 +1,6 @@
 import { useState, useEffect, Suspense, lazy } from 'react'
 import { useAuth } from './hooks/useAuth'
-import { usePlansV2 } from './hooks/usePlansV2'
+import { PlansProvider, usePlans } from './context/PlansContext'
 import AuthPage from './pages/AuthPage'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -20,7 +20,6 @@ function PageLoader() {
 
 export default function App() {
   const { user, loading } = useAuth()
-  const { activePlan } = usePlansV2()
   const [page, setPage] = useState('home')
   const [pageParams, setPageParams] = useState(null)
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark')
@@ -40,13 +39,23 @@ export default function App() {
   }
 
   return (
+    <PlansProvider>
+      <AppShell page={page} pageParams={pageParams} navigate={navigate} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
+    </PlansProvider>
+  )
+}
+
+function AppShell({ page, pageParams, navigate, darkMode, onToggleDark }) {
+  const { activePlan } = usePlans()
+
+  return (
     <div className="app-shell">
       <Suspense fallback={<PageLoader />}>
-        {page === 'home' && <HomePage activePlan={activePlan} onNavigate={navigate} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />}
+        {page === 'home' && <HomePage activePlan={activePlan} onNavigate={navigate} darkMode={darkMode} onToggleDark={onToggleDark} />}
         {page === 'plans' && <PlansPageV2 onNavigate={navigate} />}
         {page === 'plan-builder' && pageParams?.planId && <PlanBuilderPage planId={pageParams.planId} onNavigate={navigate} />}
         {page === 'exercises' && <ExercisesPage onNavigate={navigate} />}
-        {page === 'player' && pageParams && <PlayerPage {...pageParams} onBack={() => setPage('home')} onComplete={() => setPage('home')} />}
+        {page === 'player' && pageParams && <PlayerPage {...pageParams} onBack={() => navigate('home')} onComplete={() => navigate('home')} />}
         {page === 'profile' && <ProfilePage onNavigate={navigate} />}
       </Suspense>
 

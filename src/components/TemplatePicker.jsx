@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { usePlansV2 } from '../hooks/usePlansV2'
+import { usePlans } from '../context/PlansContext'
 import { DURATIONS, WARMUP_EXERCISES, getDayName } from '../data/templates'
 import { useToast } from '../context/ToastContext'
 
@@ -13,7 +13,7 @@ function getDefaultDayTypes(duration) {
 }
 
 export default function TemplatePicker({ onPlanCreated, onCancel }) {
-  const { createPlanFromTemplate } = usePlansV2()
+  const { createPlanFromTemplate } = usePlans()
   const toast = useToast()
 
   const [step, setStep] = useState(0)

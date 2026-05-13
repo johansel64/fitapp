@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks/useAuth'
-import { usePlansV2 } from '../hooks/usePlansV2'
+import { usePlans } from '../context/PlansContext'
 import { useProgress } from '../hooks/useProgress'
 import { supabase } from '../lib/supabase'
 
@@ -109,7 +109,7 @@ function MetricInput({ label, unit, value, onChange }) {
 
 export default function ProfilePage({ onNavigate }) {
   const { user, signOut } = useAuth()
-  const { myPlans, activePlan } = usePlansV2()
+  const { myPlans, activePlan } = usePlans()
   const { completedDays } = useProgress(activePlan?.id)
 
   const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuario'
@@ -154,7 +154,7 @@ export default function ProfilePage({ onNavigate }) {
   const first = history[history.length - 1]
 
   return (
-    <div style={{ paddingBottom: 80 }}>
+    <div>
       {/* Header */}
       <div className="hdr">
         <div className="hdr-logo">{initials}</div>

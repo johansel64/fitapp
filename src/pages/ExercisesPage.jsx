@@ -14,7 +14,11 @@ const MUSCLE_ES = {
 const EQUIP_ES = { none: 'Sin equipo', dumbbells: 'Mancuernas', barbell: 'Barra', machine: 'Máquina', bands: 'Bandas', bodyweight: 'Peso corporal' }
 const DIFF_ES = { beginner: 'Principiante', intermediate: 'Intermedio', advanced: 'Avanzado' }
 
-const EXERCISES_PER_PAGE = 15
+const MUSCLE_COLORS = {
+  chest: '#E35A2A', back: '#185FA5', legs: '#2DA06A', glutes: '#C026D3',
+  shoulders: '#D97706', arms: '#DC2626', core: '#0891B2', cardio: '#7C3AED',
+  full_body: '#4F46E5',
+}
 
 function ExerciseForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState(initial || { name: '', description: '', youtube_url: '', muscle_group: '', equipment: 'bodyweight', difficulty: 'beginner', is_public: false })
@@ -118,9 +122,10 @@ function VideoThumb({ ytId, ex }) {
 
 const ExerciseCard = memo(({ ex, onLike, liked, onEdit, onDelete, showActions = false }) => {
   const ytId = ex.youtube_url?.match(/(?:v=|youtu\.be\/)([^&?/]+)/)?.[1]
+  const muscleColor = MUSCLE_COLORS[ex.muscle_group] || 'var(--bd)'
 
   return (
-    <div className="card" style={{ marginBottom: 10, cursor: 'default' }}>
+    <div className="card" style={{ marginBottom: 10, cursor: 'default', borderLeft: `3px solid ${muscleColor}` }}>
       {ytId && <VideoThumb ytId={ytId} ex={ex} />}
       <div style={{ padding: '12px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -153,8 +158,44 @@ const ExerciseCard = memo(({ ex, onLike, liked, onEdit, onDelete, showActions = 
   )
 })
 
+function PageNav({ page, totalPages, onPage }) {
+  if (totalPages <= 1) return null
+
+  const pages = []
+  const start = Math.max(0, page - 2)
+  const end = Math.min(totalPages - 1, page + 2)
+
+  if (start > 0) { pages.push(0); if (start > 1) pages.push('...') }
+  for (let i = start; i <= end; i++) pages.push(i)
+  if (end < totalPages - 1) { if (end < totalPages - 2) pages.push('...'); pages.push(totalPages - 1) }
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', gap: 4, margin: '16px 0' }}>
+      <button className="chip" onClick={() => onPage(page - 1)} disabled={page === 0}>‹</button>
+      {pages.map((p, i) =>
+        p === '...' ? (
+          <span key={`dots-${i}`} style={{ padding: '6px 4px', color: 'var(--t3)', fontSize: 13 }}>…</span>
+        ) : (
+          <button key={p} className={`chip ${p === page ? 'on' : ''}`} onClick={() => onPage(p)} style={{ minWidth: 32, justifyContent: 'center' }}>
+            {p + 1}
+          </button>
+        )
+      )}
+      <button className="chip" onClick={() => onPage(page + 1)} disabled={page >= totalPages - 1}>›</button>
+    </div>
+  )
+}
+
 export default function ExercisesPage({ onNavigate }) {
-  const { myExercises, publicExercises, totalMyCount, totalPublicCount, loading, hasMore, loadMore, createExercise, updateExercise, deleteExercise, toggleLike, getUserLikes, searchExercises } = useExercises()
+  const {
+    myExercises, publicExercises,
+    totalMyCount, totalPublicCount,
+    loading, hasMoreMy, hasMorePub,
+    loadMoreMy, loadMorePub, loadPageMy, loadPagePub,
+    searchExercises, createExercise, updateExercise, deleteExercise,
+    toggleLike, getUserLikes, PAGE_SIZE,
+  } = useExercises()
+
   const [tab, setTab] = useState('explore')
   const [view, setView] = useState('list')
   const [editing, setEditing] = useState(null)
@@ -162,6 +203,7 @@ export default function ExercisesPage({ onNavigate }) {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 400)
   const [results, setResults] = useState(null)
+  const [searchHasMore, setSearchHasMore] = useState(false)
   const [filterMuscle, setFilterMuscle] = useState('')
   const [page, setPage] = useState(0)
   const [searching, setSearching] = useState(false)
@@ -171,23 +213,35 @@ export default function ExercisesPage({ onNavigate }) {
   }, [])
 
   useEffect(() => {
+    setPage(0)
     if ((debouncedSearch || filterMuscle) && tab === 'explore') {
       setSearching(true)
-      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined }).then(data => {
-        setResults(data)
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined }, 0).then(data => {
+        setResults(data.data)
+        setSearchHasMore(data.hasMore)
         setSearching(false)
       })
-    } else if (tab === 'mine') {
+    } else if ((debouncedSearch || filterMuscle) && tab === 'mine') {
       setSearching(true)
-      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined, myOnly: true }).then(data => {
-        setResults(data)
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined, myOnly: true }, 0).then(data => {
+        setResults(data.data)
+        setSearchHasMore(data.hasMore)
         setSearching(false)
       })
-    } else {
+    } else if (!debouncedSearch && !filterMuscle) {
       setResults(null)
+      setSearchHasMore(false)
       setSearching(false)
     }
   }, [debouncedSearch, filterMuscle, tab])
+
+  const isSearching = !!(debouncedSearch || filterMuscle)
+  const baseList = results !== null ? results : (tab === 'mine' ? myExercises : publicExercises)
+  const totalCount = tab === 'mine' ? totalMyCount : totalPublicCount
+
+  const from = baseList.length > 0 ? page * PAGE_SIZE + 1 : 0
+  const to = Math.min((page + 1) * PAGE_SIZE, totalCount)
+  const totalPages = Math.max(1, Math.ceil((results !== null ? results.length : totalCount) / PAGE_SIZE))
 
   const handleLike = async (id) => {
     const nowLiked = await toggleLike(id)
@@ -205,15 +259,23 @@ export default function ExercisesPage({ onNavigate }) {
     setView('list')
   }
 
-  const baseList = results !== null ? results : (tab === 'mine' ? myExercises : publicExercises)
-  const paginatedList = useMemo(() => baseList.slice(0, (page + 1) * EXERCISES_PER_PAGE), [baseList, page])
-  const paginatedHasMore = paginatedList.length < baseList.length
+  const handlePage = (newPage) => {
+    if (newPage < 0 || newPage >= totalPages) return
+    setPage(newPage)
 
-  const handleLoadMore = () => {
-    if (results === null && hasMore && baseList.length === myExercises.length && tab === 'mine') {
-      loadMore()
+    if (isSearching) {
+      setSearching(true)
+      const myOnly = tab === 'mine'
+      searchExercises(debouncedSearch, { muscle_group: filterMuscle || undefined, myOnly }, newPage).then(data => {
+        setResults(data.data)
+        setSearchHasMore(data.hasMore)
+        setSearching(false)
+      })
+    } else if (tab === 'mine') {
+      loadPageMy(newPage)
+    } else {
+      loadPagePub(newPage)
     }
-    setPage(p => p + 1)
   }
 
   if (view === 'create') return (
@@ -230,13 +292,14 @@ export default function ExercisesPage({ onNavigate }) {
     </div>
   )
 
-  const isSearching = debouncedSearch || filterMuscle
-
   return (
     <div>
       <div className="hdr">
         <button className="btn-ghost" onClick={() => onNavigate('home')}>‹</button>
-        <div><div className="hdr-title">Ejercicios</div><div className="hdr-sub">{tab === 'mine' ? `${totalMyCount} propios` : `${totalPublicCount} públicos`}</div></div>
+        <div>
+          <div className="hdr-title">Ejercicios</div>
+          <div className="hdr-sub">{tab === 'mine' ? `${totalMyCount} propios` : `${totalPublicCount} públicos`}</div>
+        </div>
         <div className="hdr-right">
           <button className="btn btn-primary btn-sm" onClick={() => setView('create')}>+ Nuevo</button>
         </div>
@@ -255,7 +318,13 @@ export default function ExercisesPage({ onNavigate }) {
         </div>
       </div>
 
-      <div className="sec" style={{ paddingBottom: 24 }}>
+      <div className="sec">
+        {!isSearching && baseList.length > 0 && totalCount > 0 && (
+          <div className="sec-lbl" style={{ marginBottom: 4 }}>
+            {from}–{isSearching ? Math.min(to, baseList.length) : Math.min((page + 1) * PAGE_SIZE, totalCount)} de {isSearching ? baseList.length : totalCount}
+          </div>
+        )}
+
         {loading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
         {searching && !loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--t2)', fontSize: 13 }}>Buscando...</div>}
         {!loading && !searching && baseList.length === 0 && (
@@ -267,7 +336,7 @@ export default function ExercisesPage({ onNavigate }) {
             {tab === 'mine' && <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setView('create')}>Crear primer ejercicio</button>}
           </div>
         )}
-        {!loading && !searching && paginatedList.map(ex => (
+        {!loading && !searching && baseList.map(ex => (
           <ExerciseCard
             key={ex.id}
             ex={ex}
@@ -278,10 +347,8 @@ export default function ExercisesPage({ onNavigate }) {
             onDelete={deleteExercise}
           />
         ))}
-        {!loading && !searching && paginatedHasMore && (
-          <button className="btn btn-secondary" style={{ width: '100%', marginTop: 8 }} onClick={handleLoadMore}>
-            Cargar más ({baseList.length - paginatedList.length} restantes)
-          </button>
+        {!loading && !searching && (
+          <PageNav page={page} totalPages={totalPages} onPage={handlePage} />
         )}
       </div>
     </div>
